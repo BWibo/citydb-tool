@@ -23,7 +23,6 @@ package org.citydb.operation.importer;
 
 public class ImportOptions {
     private int numberOfThreads;
-    private int batchSize = 20;
 
     private ImportOptions() {
     }
@@ -39,18 +38,6 @@ public class ImportOptions {
     public ImportOptions setNumberOfThreads(int numberOfThreads) {
         if (numberOfThreads > 0) {
             this.numberOfThreads = numberOfThreads;
-        }
-
-        return this;
-    }
-
-    public int getBatchSize() {
-        return batchSize;
-    }
-
-    public ImportOptions setBatchSize(int batchSize) {
-        if (batchSize > 0) {
-            this.batchSize = batchSize;
         }
 
         return this;

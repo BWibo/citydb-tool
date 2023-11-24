@@ -60,14 +60,14 @@ public class ImportHelper {
     private final FeatureStatistics statistics;
     private final Map<CacheType, ReferenceCache> caches = new EnumMap<>(CacheType.class);
     private final List<ImportLogEntry> logEntries = new ArrayList<>();
-    private final int batchSize;
+    private final Map<Table, Integer> batchCounter = new EnumMap<>(Table.class);
     private final boolean autoCommit;
 
     private SequenceValues sequenceValues;
-    private int batchCounter;
+    private boolean shouldCommit;
 
-    ImportHelper(DatabaseAdapter adapter, ImportOptions options, ReferenceManager referenceManager,
-                 ImportLogger logger, StatisticsConsumer statisticsConsumer, boolean autoCommit) throws SQLException {
+    ImportHelper(DatabaseAdapter adapter, ReferenceManager referenceManager, ImportLogger logger,
+                 StatisticsConsumer statisticsConsumer, boolean autoCommit) throws SQLException {
         this.adapter = adapter;
         this.referenceManager = referenceManager;
         this.logger = logger;
@@ -81,7 +81,6 @@ public class ImportHelper {
         tableHelper = new TableHelper(this);
         sequenceHelper = new SequenceHelper(this);
         statistics = new FeatureStatistics(objectClassHelper, namespaceHelper);
-        batchSize = Math.min(options.getBatchSize(), adapter.getSchemaAdapter().getMaximumBatchSize());
     }
 
     public DatabaseAdapter getAdapter() {
@@ -138,10 +137,15 @@ public class ImportHelper {
                 logEntries.add(ImportLogEntry.of(feature, descriptor));
             }
 
-            executeBatch(false, autoCommit);
+            if (shouldCommit) {
+                commit(autoCommit);
+            }
+
             return descriptor;
         } catch (Exception e) {
             throw new ImportException("Failed to import feature.", e);
+        } finally {
+            shouldCommit = false;
         }
     }
 
@@ -149,33 +153,43 @@ public class ImportHelper {
         sequenceValues = sequenceHelper.nextSequenceValues(visitable);
     }
 
-    void executeBatch(boolean force, boolean commit) throws ImportException, SQLException {
-        if (force || ++batchCounter == batchSize) {
-            try {
-                if (batchCounter > 0) {
-                    for (Table table : tableHelper.getCommitOrder()) {
-                        for (DatabaseImporter importer : tableHelper.getImporters(table)) {
-                            importer.executeBatch();
-                        }
+    public void executeBatch(Table table) throws SQLException {
+        if (batchCounter.merge(table, 1, Integer::sum) == adapter.getSchemaAdapter().getMaximumBatchSize()) {
+            for (Table dependency : tableHelper.getCommitOrder(table)) {
+                for (DatabaseImporter importer : tableHelper.getImporters(dependency)) {
+                    importer.executeBatch();
+                }
+
+                batchCounter.put(dependency, 0);
+            }
+
+            shouldCommit = true;
+        }
+    }
+
+    void commit(boolean commit) throws ImportException, SQLException {
+        try {
+            if (commit) {
+                for (Table table : tableHelper.getCommitOrder()) {
+                    for (DatabaseImporter importer : tableHelper.getImporters(table)) {
+                        importer.executeBatch();
                     }
                 }
 
-                for (ReferenceCache cache : caches.values()) {
-                    referenceManager.storeReferences(cache);
-                }
-
-                if (commit) {
-                    connection.commit();
-                    updateImportLog();
-                }
-
-                updateStatistics(commit);
-            } catch (SQLException e) {
-                connection.rollback();
-                throw e;
-            } finally {
-                batchCounter = 0;
+                connection.commit();
+                updateImportLog();
             }
+
+            for (ReferenceCache cache : caches.values()) {
+                referenceManager.storeReferences(cache);
+            }
+
+            updateStatistics(commit);
+        } catch (SQLException e) {
+            connection.rollback();
+            throw e;
+        } finally {
+            batchCounter.clear();
         }
     }
 

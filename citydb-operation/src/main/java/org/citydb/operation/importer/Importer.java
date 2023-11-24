@@ -119,7 +119,7 @@ public class Importer {
             countLatch = new CountLatch();
             contexts = ThreadLocal.withInitial(() -> {
                 try {
-                    ImportHelper helper = new ImportHelper(adapter, options, referenceManager, logger,
+                    ImportHelper helper = new ImportHelper(adapter, referenceManager, logger,
                             statisticsConsumer, autoCommit);
                     helpers.add(helper);
                     return helper;
@@ -175,7 +175,7 @@ public class Importer {
                 countLatch.increment();
                 service.execute(() -> {
                     try {
-                        helper.executeBatch(true, true);
+                        helper.commit(true);
                         helper.close();
                     } catch (Throwable e) {
                         exception = e;

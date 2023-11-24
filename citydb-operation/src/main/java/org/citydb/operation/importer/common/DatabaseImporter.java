@@ -48,8 +48,6 @@ public abstract class DatabaseImporter {
     protected final TableHelper tableHelper;
     protected final PreparedStatement stmt;
 
-    private int batchCounter;
-
     public DatabaseImporter(Table table, ImportHelper helper) throws SQLException {
         this.table = table;
         this.helper = helper;
@@ -101,20 +99,11 @@ public abstract class DatabaseImporter {
 
     protected void addBatch() throws SQLException {
         stmt.addBatch();
-        if (++batchCounter == adapter.getSchemaAdapter().getMaximumBatchSize()) {
-            for (Table table : tableHelper.getCommitOrder(table)) {
-                for (DatabaseImporter importer : tableHelper.getImporters(table)) {
-                    importer.executeBatch();
-                }
-            }
-        }
+        helper.executeBatch(table);
     }
 
     public void executeBatch() throws SQLException {
-        if (batchCounter > 0) {
-            stmt.executeBatch();
-            batchCounter = 0;
-        }
+        stmt.executeBatch();
     }
 
     public void close() throws SQLException {
