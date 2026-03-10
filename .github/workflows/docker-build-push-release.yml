@@ -15,7 +15,9 @@ jobs:
     steps:
       - name: Get release version without v
         id: release_version
-        uses: battila7/get-version-action@v2
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
       - name: set lower case owner name
         run: |
           echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}

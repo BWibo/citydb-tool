@@ -15,8 +15,9 @@ jobs:
 
     steps:
       - name: Parse short sha
-        uses: benjlevesque/short-sha@v3.0
         id: short-sha
+        run: |
+          echo "sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
       - name: set lower case owner name
         run: |
           echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
