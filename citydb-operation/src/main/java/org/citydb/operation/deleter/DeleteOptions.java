@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.deleter;
@@ -31,13 +15,27 @@ import java.util.Optional;
 
 @SerializableConfig(name = "deleteOptions")
 public class DeleteOptions {
-    private int numberOfThreads;
+    public static final int DEFAULT_COMMIT_AFTER = 1000;
+
     @JSONField(serializeFeatures = JSONWriter.Feature.WriteEnumUsingToString)
-    private DeleteMode mode = DeleteMode.DELETE;
+    private DeleteMode mode = DeleteMode.TERMINATE;
+    @JSONField(serialize = false, deserialize = false)
+    private int numberOfThreads;
+    private int commitAfter;
+    private boolean terminateWithSubFeatures = true;
+    private OffsetDateTime terminationDate;
     private String updatingPerson;
     private String reasonForUpdate;
     private String lineage;
-    private OffsetDateTime terminationDate;
+
+    public DeleteMode getMode() {
+        return mode != null ? mode : DeleteMode.TERMINATE;
+    }
+
+    public DeleteOptions setMode(DeleteMode mode) {
+        this.mode = mode;
+        return this;
+    }
 
     public int getNumberOfThreads() {
         return numberOfThreads;
@@ -48,12 +46,30 @@ public class DeleteOptions {
         return this;
     }
 
-    public DeleteMode getMode() {
-        return mode != null ? mode : DeleteMode.DELETE;
+    public int getCommitAfter() {
+        return commitAfter;
     }
 
-    public DeleteOptions setMode(DeleteMode mode) {
-        this.mode = mode;
+    public DeleteOptions setCommitAfter(int commitAfter) {
+        this.commitAfter = commitAfter;
+        return this;
+    }
+
+    public boolean isTerminateWithSubFeatures() {
+        return terminateWithSubFeatures;
+    }
+
+    public DeleteOptions setTerminateWithSubFeatures(boolean terminateWithSubFeatures) {
+        this.terminateWithSubFeatures = terminateWithSubFeatures;
+        return this;
+    }
+
+    public Optional<OffsetDateTime> getTerminationDate() {
+        return Optional.ofNullable(terminationDate);
+    }
+
+    public DeleteOptions setTerminationDate(OffsetDateTime terminationDate) {
+        this.terminationDate = terminationDate;
         return this;
     }
 
@@ -81,15 +97,6 @@ public class DeleteOptions {
 
     public DeleteOptions setLineage(String lineage) {
         this.lineage = lineage;
-        return this;
-    }
-
-    public Optional<OffsetDateTime> getTerminationDate() {
-        return Optional.ofNullable(terminationDate);
-    }
-
-    public DeleteOptions setTerminationDate(OffsetDateTime terminationDate) {
-        this.terminationDate = terminationDate;
         return this;
     }
 }

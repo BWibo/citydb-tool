@@ -1,0 +1,98 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
+ */
+
+package org.citydb.cli.common;
+
+import org.citydb.cli.ExecutionException;
+import org.citydb.cli.util.ConsolePrompt;
+import org.citydb.database.DatabaseConstants;
+import org.citydb.database.connection.ConnectionDetails;
+import picocli.CommandLine;
+
+import java.util.Collections;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+public class ConnectionOptions implements Option {
+    @CommandLine.Option(names = {"-H", "--db-host"},
+            description = "Name of the host on which the 3DCityDB is running.")
+    private String host;
+
+    @CommandLine.Option(names = {"-P", "--db-port"},
+            description = "Port of the 3DCityDB server (default: 5432).")
+    private Integer port;
+
+    @CommandLine.Option(names = {"-d", "--db-name"},
+            description = "Name of the 3DCityDB database to connect to.")
+    private String database;
+
+    @CommandLine.Option(names = {"-S", "--db-schema"},
+            description = "Schema to use when connecting to the 3DCityDB (default: citydb or username).")
+    private String schema;
+
+    @CommandLine.Option(names = {"-u", "--db-username"},
+            description = "Username to use when connecting to the 3DCityDB.")
+    private String user;
+
+    @CommandLine.Option(names = {"-p", "--db-password"}, arity = "0..1",
+            description = "Password to use when connecting to the 3DCityDB. Leave empty to be prompted.")
+    private String password;
+
+    @CommandLine.Option(names = "--db-property", split = ",", paramLabel = "<property=value>",
+            description = "Database-specific connection properties.")
+    private Map<String, String> properties;
+
+    public String getHost() {
+        return host;
+    }
+
+    public Integer getPort() {
+        return port;
+    }
+
+    public String getDatabase() {
+        return database;
+    }
+
+    public String getSchema() {
+        return schema;
+    }
+
+    public String getUser() {
+        return user;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public Map<String, String> getProperties() {
+        return properties != null ? properties : Collections.emptyMap();
+    }
+
+    public ConnectionDetails toConnectionDetails() {
+        return new ConnectionDetails()
+                .setHost(host)
+                .setPort(port)
+                .setDatabase(database)
+                .setSchema(schema)
+                .setUser(user)
+                .setPassword(password)
+                .setProperties(properties != null ? properties.entrySet().stream()
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)) :
+                        null);
+    }
+
+    @Override
+    public void preprocess(CommandLine commandLine) throws Exception {
+        if (password != null && password.isEmpty()) {
+            password = ConsolePrompt.console()
+                    .prompt("Enter password for %s: ", user != null ? user : "<username>")
+                    .readPassword()
+                    .orElseThrow(() -> new ExecutionException("No console available. Supply the password as " +
+                            "argument or " + DatabaseConstants.ENV_CITYDB_PASSWORD + " environment variable."));
+        }
+    }
+}

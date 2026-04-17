@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.core.file.output;
@@ -30,6 +14,7 @@ import org.citydb.core.file.helper.Pipe;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Objects;
@@ -40,16 +25,18 @@ import java.util.zip.ZipEntry;
 
 public class ZipOutputFile extends OutputFile {
     private final String contentFile;
+    private Path tempDir;
     private final ParallelZipCreator zipCreator;
     private final Set<String> entries = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public ZipOutputFile(String contentFile, Path zipFile, Path tempDir, int compressionLevel) throws IOException {
+    public ZipOutputFile(String contentFile, Path zipFile, Path tempDir, int compressionLevel) {
         super(zipFile, FileType.ARCHIVE);
         this.contentFile = Objects.requireNonNull(contentFile, "The content file must not be null.");
+        this.tempDir = Objects.requireNonNull(tempDir, "The temporary directory must not be null.");
         zipCreator = new ParallelZipCreator(tempDir, compressionLevel);
     }
 
-    public ZipOutputFile(String contentFile, Path zipFile, Path tempDir) throws IOException {
+    public ZipOutputFile(String contentFile, Path zipFile, Path tempDir) {
         this(contentFile, zipFile, tempDir, Deflater.DEFAULT_COMPRESSION);
     }
 
@@ -58,7 +45,13 @@ public class ZipOutputFile extends OutputFile {
     }
 
     @Override
-    public OutputStream openStream() {
+    public OutputStream openStream() throws IOException {
+        if (!Files.exists(tempDir)) {
+            Files.createDirectories(tempDir);
+        } else if (!Files.isDirectory(tempDir)) {
+            throw new IOException("The temporary ZIP content path " + tempDir + " is not a directory.");
+        }
+
         return newOutputStream(contentFile);
     }
 
@@ -78,7 +71,7 @@ public class ZipOutputFile extends OutputFile {
             Pipe pipe = new Pipe();
             ZipArchiveEntry entry = new ZipArchiveEntry(file);
             entry.setMethod(ZipEntry.DEFLATED);
-            zipCreator.addArchiveEntry(entry, pipe::sink);
+            zipCreator.addArchiveEntry(entry, pipe);
             return pipe.source();
         } else {
             return OutputStream.nullOutputStream();

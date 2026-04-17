@@ -1,38 +1,26 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter.appearance;
 
 import org.citydb.database.schema.FeatureType;
-import org.citydb.database.schema.Table;
 import org.citydb.model.appearance.*;
-import org.citydb.model.common.Reference;
 import org.citydb.operation.exporter.ExportException;
 import org.citydb.operation.exporter.ExportHelper;
 import org.citydb.operation.exporter.common.DatabaseExporter;
+import org.citydb.operation.exporter.options.AppearanceOptions;
+import org.citydb.sqlbuilder.literal.Placeholder;
+import org.citydb.sqlbuilder.operation.BooleanExpression;
+import org.citydb.sqlbuilder.operation.Operators;
+import org.citydb.sqlbuilder.query.CommonTableExpression;
+import org.citydb.sqlbuilder.query.Select;
+import org.citydb.sqlbuilder.query.Sets;
+import org.citydb.sqlbuilder.schema.Table;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
-import java.time.OffsetDateTime;
 import java.util.*;
 
 public class AppearanceExporter extends DatabaseExporter {
@@ -45,36 +33,54 @@ public class AppearanceExporter extends DatabaseExporter {
         material = schemaMapping.getFeatureType(X3DMaterial.newInstance().getName());
         parameterizedTexture = schemaMapping.getFeatureType(ParameterizedTexture.newInstance().getName());
         georeferencedTexture = schemaMapping.getFeatureType(GeoreferencedTexture.newInstance().getName());
-        stmt = helper.getConnection().prepareStatement(getBaseQuery() +
-                "where a.id = ?");
+        stmt = helper.getConnection().prepareStatement(getQuery().toSql());
     }
 
-    private String getBaseQuery() {
-        return "select a.id, a.objectid, a.identifier, a.identifier_codespace, a.theme, a.creation_date, " +
-                "a.termination_date, a.valid_from, a.valid_to, a.feature_id, a.implicit_geometry_id, " +
-                "sd.id as sd_id, sd.objectid as sd_objectid, sd.identifier as sd_identifier, " +
-                "sd.identifier_codespace as sd_identifier_codespace, sd.is_front, sd.objectclass_id, " +
-                "sd.x3d_shininess, sd.x3d_transparency, sd.x3d_ambient_intensity, sd.x3d_specular_color, " +
-                "sd.x3d_diffuse_color, sd.x3d_emissive_color, sd.x3d_is_smooth, sd.tex_image_id, " +
-                "sd.tex_texture_type, sd.tex_wrap_mode, sd.tex_border_color, sd.gt_orientation, " +
-                "sd.gt_reference_point, ti.image_uri, ti.mime_type, ti.mime_type_codespace, " +
-                "sdm.geometry_data_id, sdm.material_mapping, sdm.texture_mapping, sdm.world_to_texture_mapping, " +
-                "sdm.georeferenced_texture_mapping " +
-                "from " + tableHelper.getPrefixedTableName(Table.APPEARANCE) + " a " +
-                "inner join " + tableHelper.getPrefixedTableName(Table.APPEAR_TO_SURFACE_DATA) + " a2sd on a.id = a2sd.appearance_id " +
-                "inner join " + tableHelper.getPrefixedTableName(Table.SURFACE_DATA) + " sd on a2sd.surface_data_id = sd.id " +
-                "left join " + tableHelper.getPrefixedTableName(Table.TEX_IMAGE) + " ti on sd.tex_image_id = ti.id " +
-                "left join " + tableHelper.getPrefixedTableName(Table.SURFACE_DATA_MAPPING) + " sdm on sd.id = sdm.surface_data_id ";
-    }
+    private Select getQuery() {
+        Table appearance = tableHelper.getTable(org.citydb.database.schema.Table.APPEARANCE);
+        Table appearToSurfaceData = tableHelper.getTable(org.citydb.database.schema.Table.APPEAR_TO_SURFACE_DATA);
+        Table surfaceData = tableHelper.getTable(org.citydb.database.schema.Table.SURFACE_DATA);
+        Table texImage = tableHelper.getTable(org.citydb.database.schema.Table.TEX_IMAGE);
+        Table surfaceDataMapping = tableHelper.getTable(org.citydb.database.schema.Table.SURFACE_DATA_MAPPING);
+        BooleanExpression themeFilter = getThemeFilter(appearance);
 
-    private String getQuery(Set<Long> ids, Set<Long> implicitGeometryIds) {
-        return getBaseQuery() +
-                "where " + adapter.getSchemaAdapter().getInOperator("a.id", ids) +
-                " or " + adapter.getSchemaAdapter().getInOperator("a.implicit_geometry_id", implicitGeometryIds);
+        Select filter = Select.newInstance().select(appearance.column("id")).from(appearance);
+        if (themeFilter != null) {
+            filter.where(themeFilter);
+        }
+
+        CommonTableExpression appearances = CommonTableExpression.of("appearances", Sets.unionAll(
+                Select.of(filter).where(operationHelper.inArray(appearance.column("id"), Placeholder.empty())),
+                Select.of(filter).where(operationHelper.inArray(appearance.column("implicit_geometry_id"),
+                        Placeholder.empty()))
+        ));
+
+        return Select.newInstance()
+                .with(appearances)
+                .select(appearance.columns("id", "objectid", "identifier", "identifier_codespace", "theme",
+                        "feature_id", "implicit_geometry_id"))
+                .select(surfaceData.columns(Map.of("id", "sd_id", "objectid", "sd_objectid", "identifier",
+                        "sd_identifier", "identifier_codespace", "sd_identifier_codespace")))
+                .select(surfaceData.columns("is_front", "objectclass_id", "x3d_shininess", "x3d_transparency",
+                        "x3d_ambient_intensity", "x3d_specular_color", "x3d_diffuse_color", "x3d_emissive_color",
+                        "x3d_is_smooth", "tex_image_id", "tex_texture_type", "tex_wrap_mode", "tex_border_color",
+                        "gt_orientation"))
+                .select(helper.getTransformOperator(surfaceData.column("gt_reference_point")))
+                .select(texImage.columns("image_uri", "mime_type", "mime_type_codespace"))
+                .select(surfaceDataMapping.columns("geometry_data_id", "material_mapping", "texture_mapping",
+                        "world_to_texture_mapping", "georeferenced_texture_mapping"))
+                .from(appearances.asTable())
+                .join(appearance).on(appearance.column("id").eq(appearances.asTable().column("id")))
+                .join(appearToSurfaceData).on(appearToSurfaceData.column("appearance_id").eq(appearance.column("id")))
+                .join(surfaceData).on(surfaceData.column("id").eq(appearToSurfaceData.column("surface_data_id")))
+                .leftJoin(texImage).on(texImage.column("id").eq(surfaceData.column("tex_image_id")))
+                .leftJoin(surfaceDataMapping).on(surfaceDataMapping.column("surface_data_id")
+                        .eq(surfaceData.column("id")));
     }
 
     public Appearance doExport(long id) throws ExportException, SQLException {
-        stmt.setLong(1, id);
+        setLongArrayOrNull(1, List.of(id));
+        setLongArrayOrNull(2, Collections.emptyList());
         try (ResultSet rs = stmt.executeQuery()) {
             return doExport(rs).get(id);
         }
@@ -82,8 +88,9 @@ public class AppearanceExporter extends DatabaseExporter {
 
     public Map<Long, Appearance> doExport(Set<Long> ids, Set<Long> implicitGeometryIds) throws ExportException, SQLException {
         if (!ids.isEmpty() || !implicitGeometryIds.isEmpty()) {
-            try (Statement stmt = helper.getConnection().createStatement();
-                 ResultSet rs = stmt.executeQuery(getQuery(ids, implicitGeometryIds))) {
+            setLongArrayOrNull(1, ids);
+            setLongArrayOrNull(2, implicitGeometryIds);
+            try (ResultSet rs = stmt.executeQuery()) {
                 return doExport(rs);
             }
         } else {
@@ -106,10 +113,6 @@ public class AppearanceExporter extends DatabaseExporter {
                         .setObjectId(rs.getString("objectid"))
                         .setIdentifier(rs.getString("identifier"))
                         .setIdentifierCodeSpace(rs.getString("identifier_codespace"))
-                        .setCreationDate(rs.getObject("creation_date", OffsetDateTime.class))
-                        .setTerminationDate(rs.getObject("termination_date", OffsetDateTime.class))
-                        .setValidFrom(rs.getObject("valid_from", OffsetDateTime.class))
-                        .setValidTo(rs.getObject("valid_to", OffsetDateTime.class))
                         .setDescriptor(AppearanceDescriptor.of(id)
                                 .setFeatureId(rs.getLong("feature_id"))
                                 .setImplicitGeometryId(rs.getLong("implicit_geometry_id")));
@@ -134,7 +137,7 @@ public class AppearanceExporter extends DatabaseExporter {
             if (surfaceData != null) {
                 if (surfaceDataByAppearance.computeIfAbsent(id, v -> new HashSet<>()).add(surfaceDataId)) {
                     appearance.getSurfaceData().add(helper.lookupAndPut(surfaceData) ?
-                            SurfaceDataProperty.of(Reference.of(surfaceData.getOrCreateObjectId())) :
+                            SurfaceDataProperty.of(surfaceData.getOrCreateObjectId()) :
                             SurfaceDataProperty.of(surfaceData));
                 }
 
@@ -143,5 +146,25 @@ public class AppearanceExporter extends DatabaseExporter {
         }
 
         return appearances;
+    }
+
+    private BooleanExpression getThemeFilter(Table appearance) {
+        AppearanceOptions options = helper.getOptions().getAppearanceOptions().orElse(null);
+        if (options != null && options.hasThemes()) {
+            Set<String> themes = options.getThemes();
+            boolean containsNullTheme = themes.contains(null);
+            if (containsNullTheme && themes.size() == 1) {
+                return appearance.column("theme").isNull();
+            } else {
+                BooleanExpression filter = operationHelper.in(appearance.column("theme"), themes.stream()
+                        .filter(Objects::nonNull)
+                        .toList());
+                return containsNullTheme ?
+                        Operators.or(appearance.column("theme").isNull(), filter) :
+                        filter;
+            }
+        } else {
+            return null;
+        }
     }
 }

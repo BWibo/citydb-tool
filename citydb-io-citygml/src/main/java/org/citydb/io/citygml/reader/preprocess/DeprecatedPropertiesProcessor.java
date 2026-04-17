@@ -1,29 +1,11 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader.preprocess;
 
-import org.apache.logging.log4j.Logger;
 import org.citydb.io.citygml.reader.util.FeatureHelper;
-import org.citydb.logging.LoggerManager;
 import org.citygml4j.core.model.bridge.*;
 import org.citygml4j.core.model.building.AbstractBuilding;
 import org.citygml4j.core.model.building.BuildingFurniture;
@@ -69,6 +51,8 @@ import org.citygml4j.core.model.vegetation.PlantCover;
 import org.citygml4j.core.model.vegetation.SolitaryVegetationObject;
 import org.citygml4j.core.model.waterbody.WaterBody;
 import org.citygml4j.core.visitor.ObjectWalker;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.xmlobjects.gml.model.geometry.AbstractGeometry;
 import org.xmlobjects.gml.model.geometry.GeometryProperty;
 import org.xmlobjects.gml.model.geometry.aggregates.*;
@@ -77,10 +61,9 @@ import org.xmlobjects.gml.model.geometry.primitives.*;
 import org.xmlobjects.util.copy.CopyBuilder;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.function.Supplier;
 
 public class DeprecatedPropertiesProcessor {
-    private final Supplier<CopyBuilder> copyBuilderSupplier;
+    private final CopyBuilder copyBuilder;
     private final DeprecatedPropertiesWalker deprecatedPropertiesWalker = new DeprecatedPropertiesWalker();
     private final LodFilter lodFilter = new LodFilter()
             .setMode(LodFilter.Mode.REMOVE)
@@ -91,8 +74,8 @@ public class DeprecatedPropertiesProcessor {
     private boolean mapLod0RoofEdge;
     private boolean mapLod1MultiSurfaces;
 
-    DeprecatedPropertiesProcessor(Supplier<CopyBuilder> copyBuilderSupplier) {
-        this.copyBuilderSupplier = copyBuilderSupplier;
+    DeprecatedPropertiesProcessor(CopyBuilder copyBuilder) {
+        this.copyBuilder = copyBuilder;
     }
 
     boolean isUseLod4AsLod3() {
@@ -146,7 +129,7 @@ public class DeprecatedPropertiesProcessor {
     }
 
     private class DeprecatedPropertiesWalker extends ObjectWalker {
-        private final Logger logger = LoggerManager.getInstance().getLogger(DeprecatedPropertiesWalker.class);
+        private final Logger logger = LoggerFactory.getLogger(DeprecatedPropertiesWalker.class);
 
         @Override
         public void visit(AbstractBridge bridge) {
@@ -767,7 +750,7 @@ public class DeprecatedPropertiesProcessor {
         }
 
         public <S extends T, D extends T, T> D copy(S src, D dest, Class<T> template) {
-            return copyBuilderSupplier.get().shallowCopy(src, dest, template);
+            return copyBuilder.shallowCopy(src, dest, template);
         }
     }
 }

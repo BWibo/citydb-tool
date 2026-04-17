@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.writer;
@@ -25,6 +9,7 @@ import org.citydb.core.file.OutputFile;
 import org.citydb.io.writer.WriteException;
 import org.citydb.io.writer.WriteOptions;
 import org.citygml4j.cityjson.CityJSONContext;
+import org.citygml4j.cityjson.model.CityJSONVersion;
 import org.citygml4j.cityjson.writer.AbstractCityJSONWriter;
 import org.citygml4j.cityjson.writer.CityJSONOutputFactory;
 import org.citygml4j.cityjson.writer.OutputEncoding;
@@ -61,7 +46,9 @@ public class CityJSONWriterFactory {
                     .writeGenericAttributeTypes(formatOptions.isWriteGenericAttributeTypes());
 
             OutputEncoding encoding = getOutputEncoding(options.getEncoding().orElse(null));
-            AbstractCityJSONWriter<?> writer = formatOptions.isJsonLines() ?
+            boolean shouldStream = formatOptions.isJsonLines() && formatOptions.getVersion() != CityJSONVersion.v1_0;
+
+            AbstractCityJSONWriter<?> writer = shouldStream ?
                     factory.createCityJSONFeatureWriter(file.openStream(), encoding) :
                     factory.createCityJSONWriter(file.openStream(), encoding)
                             .withIndent(formatOptions.isPrettyPrint() ? "  " : null);

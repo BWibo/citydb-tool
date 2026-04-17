@@ -1,28 +1,13 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.config;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONException;
+import com.alibaba.fastjson2.JSONReader;
 import com.alibaba.fastjson2.JSONWriter;
 
 import java.io.BufferedInputStream;
@@ -46,7 +31,8 @@ public class ConfigManager {
     public <T> T read(Path inputFile, Class<T> type) throws ConfigException, IOException {
         Objects.requireNonNull(inputFile, "The input file must not be null.");
         try (InputStream stream = new BufferedInputStream(Files.newInputStream(inputFile))) {
-            return JSON.parseObject(new String(stream.readAllBytes(), StandardCharsets.UTF_8), type);
+            return JSON.parseObject(new String(stream.readAllBytes(), StandardCharsets.UTF_8), type,
+                    JSONReader.Feature.UseDoubleForDecimals);
         } catch (JSONException e) {
             throw new ConfigException("Failed to parse config file " + inputFile + ".", e);
         }
@@ -60,10 +46,10 @@ public class ConfigManager {
     public void write(Object config, Path outputFile) throws IOException {
         Objects.requireNonNull(config, "The config object must not be null.");
         outputFile = Objects.requireNonNull(outputFile, "The output file must not be null.")
-                .normalize()
-                .toAbsolutePath();
+                .toAbsolutePath()
+                .normalize();
 
         Files.writeString(outputFile, JSON.toJSONString(config, JSONWriter.Feature.FieldBased,
-                JSONWriter.Feature.PrettyFormat));
+                JSONWriter.Feature.PrettyFormatWith2Space));
     }
 }

@@ -1,27 +1,11 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.importer.geometry;
 
-import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONWriter;
 import org.citydb.database.schema.Sequence;
 import org.citydb.database.schema.Table;
 import org.citydb.model.geometry.Geometry;
@@ -31,7 +15,6 @@ import org.citydb.operation.importer.ImportHelper;
 import org.citydb.operation.importer.common.DatabaseImporter;
 
 import java.sql.SQLException;
-import java.sql.Types;
 import java.util.Collections;
 
 public class GeometryImporter extends DatabaseImporter {
@@ -51,32 +34,22 @@ public class GeometryImporter extends DatabaseImporter {
         long geometryId = nextSequenceValue(Sequence.GEOMETRY_DATA);
         stmt.setLong(1, geometryId);
 
+        Object value;
         int geometryIndex, nullIndex;
         if (isImplicit) {
+            value = getImplicitGeometry(geometry);
             geometryIndex = 3;
             nullIndex = 2;
         } else {
+            value = getGeometry(geometry, true);
             geometryIndex = 2;
             nullIndex = 3;
         }
 
-        Object value = getGeometry(geometry, true);
-        if (value != null) {
-            stmt.setObject(geometryIndex, value, adapter.getGeometryAdapter().getGeometrySQLType());
-        } else {
-            stmt.setNull(geometryIndex, adapter.getGeometryAdapter().getGeometrySQLType(),
-                    adapter.getGeometryAdapter().getGeometryTypeName());
-        }
-        stmt.setNull(nullIndex, adapter.getGeometryAdapter().getGeometrySQLType(),
-                adapter.getGeometryAdapter().getGeometryTypeName());
-
-        JSONObject geometryProperties = adapter.getGeometryAdapter().buildGeometryProperties(geometry);
-        if (geometryProperties != null) {
-            stmt.setObject(4, geometryProperties.toString(), Types.OTHER);
-        } else {
-            stmt.setNull(4, Types.OTHER);
-        }
-
+        setGeometryOrNull(geometryIndex, value);
+        setGeometryOrNull(nullIndex, null);
+        setJsonOrNull(4, getJson(adapter.getGeometryAdapter().buildGeometryProperties(geometry),
+                JSONWriter.Feature.LargeObject));
         stmt.setLong(5, featureId);
 
         addBatch();

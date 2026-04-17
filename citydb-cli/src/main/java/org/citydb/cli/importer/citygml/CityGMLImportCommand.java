@@ -1,34 +1,22 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.cli.importer.citygml;
 
+import org.citydb.cli.ExecutionException;
+import org.citydb.cli.common.AppearanceOptions;
+import org.citydb.cli.common.UpgradeOptions;
 import org.citydb.cli.importer.ImportController;
-import org.citydb.cli.option.UpgradeOptions;
-import org.citydb.config.ConfigObject;
+import org.citydb.config.ConfigException;
+import org.citydb.config.common.ConfigObject;
 import org.citydb.io.IOAdapter;
 import org.citydb.io.IOAdapterManager;
 import org.citydb.io.citygml.CityGMLAdapter;
 import org.citydb.io.citygml.reader.CityGMLFormatOptions;
-import org.citydb.io.reader.option.InputFormatOptions;
+import org.citydb.io.citygml.reader.options.FormatOptions;
+import org.citydb.io.reader.options.InputFormatOptions;
 import picocli.CommandLine;
 
 @CommandLine.Command(
@@ -37,9 +25,16 @@ import picocli.CommandLine;
 public class CityGMLImportCommand extends ImportController {
     @CommandLine.Option(names = "--import-xal-source",
             description = "Import XML snippets of xAL address elements.")
-    protected Boolean importXALSource;
+    private Boolean importXALSource;
 
-    @CommandLine.ArgGroup(exclusive = false,
+    @CommandLine.Option(names = {"-x", "--xsl-transform"}, split = ",", paramLabel = "<stylesheet>",
+            description = "Apply XSLT stylesheets to transform input.")
+    private String[] stylesheets;
+
+    @CommandLine.ArgGroup(exclusive = false)
+    private AppearanceOptions appearanceOptions;
+
+    @CommandLine.ArgGroup(exclusive = false, order = ARG_GROUP_ORDER,
             heading = "Upgrade options for CityGML 2.0 and 1.0:%n")
     private UpgradeOptions upgradeOptions;
 
@@ -49,11 +44,22 @@ public class CityGMLImportCommand extends ImportController {
     }
 
     @Override
-    protected InputFormatOptions getFormatOptions(ConfigObject<InputFormatOptions> formatOptions) {
-        CityGMLFormatOptions options = formatOptions.getOrElse(CityGMLFormatOptions.class, CityGMLFormatOptions::new);
+    protected InputFormatOptions getFormatOptions(ConfigObject<InputFormatOptions> formatOptions) throws ExecutionException {
+        CityGMLFormatOptions options;
+        try {
+            options = formatOptions.getOrElse(CityGMLFormatOptions.class, CityGMLFormatOptions::new);
+        } catch (ConfigException e) {
+            throw new ExecutionException("Failed to get CityGML format options from config.", e);
+        }
 
         if (importXALSource != null) {
-            options.setImportXALSource(importXALSource);
+            options.setIncludeXALSource(importXALSource);
+        }
+
+        if (stylesheets != null) {
+            for (String stylesheet : stylesheets) {
+                options.addXslTransform(helper.resolveAgainstWorkingDir(stylesheet));
+            }
         }
 
         if (upgradeOptions != null) {
@@ -70,6 +76,19 @@ public class CityGMLImportCommand extends ImportController {
             }
         }
 
+        if (appearanceOptions != null) {
+            getAppearanceOptions(options)
+                    .setReadAppearances(appearanceOptions.isProcessAppearances())
+                    .setThemes(appearanceOptions.getThemes());
+        }
+
         return options;
+    }
+
+    private org.citydb.io.citygml.reader.options.AppearanceOptions getAppearanceOptions(FormatOptions<?> formatOptions) {
+        org.citydb.io.citygml.reader.options.AppearanceOptions appearanceOptions = formatOptions.getAppearanceOptions()
+                .orElseGet(org.citydb.io.citygml.reader.options.AppearanceOptions::new);
+        formatOptions.setAppearanceOptions(appearanceOptions);
+        return appearanceOptions;
     }
 }

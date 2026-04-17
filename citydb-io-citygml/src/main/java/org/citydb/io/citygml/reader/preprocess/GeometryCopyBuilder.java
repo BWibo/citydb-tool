@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader.preprocess;
@@ -39,18 +23,17 @@ import org.xmlobjects.util.copy.CopyBuilder;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
 public class GeometryCopyBuilder {
-    private final Supplier<CopyBuilder> copyBuilderSupplier;
+    private final CopyBuilder copyBuilder;
     private final AppearanceProcessor appearanceProcessor = new AppearanceProcessor();
     private final String ID = "id";
 
     private AppearanceHelper appearanceHelper;
     private boolean copyAppearance;
 
-    GeometryCopyBuilder(Supplier<CopyBuilder> copyBuilderSupplier) {
-        this.copyBuilderSupplier = copyBuilderSupplier;
+    GeometryCopyBuilder(CopyBuilder copyBuilder) {
+        this.copyBuilder = copyBuilder;
     }
 
     GeometryCopyBuilder withAppearanceHelper(AppearanceHelper appearanceHelper) {
@@ -72,7 +55,7 @@ public class GeometryCopyBuilder {
     }
 
     private AbstractGeometry copy(AbstractGeometry geometry, AbstractCityObject topLevelObject) {
-        AbstractGeometry copy = copyBuilderSupplier.get().deepCopy(geometry);
+        AbstractGeometry copy = copyBuilder.deepCopy(geometry);
 
         IdHelper idHelper = new IdHelper();
         idHelper.updateIds(copy, copyAppearance);
@@ -132,7 +115,7 @@ public class GeometryCopyBuilder {
             if (properties != null) {
                 for (TextureAssociationProperty property : properties) {
                     ParameterizedTexture texture = getOrCreateSurfaceData(property, ParameterizedTexture.class);
-                    TextureAssociationProperty copy = copyBuilderSupplier.get().deepCopy(property);
+                    TextureAssociationProperty copy = copyBuilder.deepCopy(property);
                     idHelper.visit(copy);
                     texture.getTextureParameterizations().add(copy);
                 }
@@ -171,7 +154,7 @@ public class GeometryCopyBuilder {
                 }
             }
 
-            T surfaceData = copyBuilderSupplier.get().shallowCopy(source);
+            T surfaceData = copyBuilder.shallowCopy(source);
             surfaceData.setId(null);
             surfaceData.getLocalProperties().set(ID, source.getLocalProperties().getOrSet(ID, Integer.class, () -> id++));
             appearance.getSurfaceData().add(new AbstractSurfaceDataProperty(surfaceData));
@@ -199,7 +182,7 @@ public class GeometryCopyBuilder {
                 }
             }
 
-            Appearance appearance = copyBuilderSupplier.get().shallowCopy(source);
+            Appearance appearance = copyBuilder.shallowCopy(source);
             appearance.setId(null);
             appearance.setSurfaceData(null);
             appearance.getLocalProperties().set(ID, source.getLocalProperties().getOrSet(ID, Integer.class, () -> id++));

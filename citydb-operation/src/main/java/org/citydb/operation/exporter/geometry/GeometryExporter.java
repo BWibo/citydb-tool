@@ -1,46 +1,39 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter.geometry;
 
 import com.alibaba.fastjson2.JSONObject;
 import org.citydb.database.geometry.GeometryException;
-import org.citydb.database.schema.Table;
 import org.citydb.model.geometry.Geometry;
 import org.citydb.model.geometry.GeometryDescriptor;
 import org.citydb.operation.exporter.ExportException;
 import org.citydb.operation.exporter.ExportHelper;
 import org.citydb.operation.exporter.common.DatabaseExporter;
+import org.citydb.sqlbuilder.literal.Placeholder;
+import org.citydb.sqlbuilder.query.Select;
+import org.citydb.sqlbuilder.schema.Table;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.*;
 
 public class GeometryExporter extends DatabaseExporter {
 
     public GeometryExporter(ExportHelper helper) throws SQLException {
         super(helper);
-        stmt = helper.getConnection().prepareStatement("select geometry, implicit_geometry, " +
-                "geometry_properties, feature_id as geometry_feature_id " +
-                "from " + tableHelper.getPrefixedTableName(Table.GEOMETRY_DATA) +
-                " where id = ?");
+        stmt = helper.getConnection().prepareStatement(getQuery().toSql());
+    }
+
+    private Select getQuery() {
+        Table geometryData = tableHelper.getTable(org.citydb.database.schema.Table.GEOMETRY_DATA);
+        return Select.newInstance()
+                .select(geometryData.columns("id", "implicit_geometry", "geometry_properties", "feature_id"))
+                .select(helper.getTransformOperator(geometryData.column("geometry")))
+                .from(geometryData)
+                .where(operationHelper.inArray(geometryData.column("id"), Placeholder.empty()));
     }
 
     public Geometry<?> doExport(long id) throws ExportException, SQLException {
@@ -48,17 +41,42 @@ public class GeometryExporter extends DatabaseExporter {
     }
 
     public Geometry<?> doExport(long id, boolean isImplicit) throws ExportException, SQLException {
-        stmt.setLong(1, id);
+        setLongArrayOrNull(1, List.of(id));
         try (ResultSet rs = stmt.executeQuery()) {
             if (rs.next()) {
-                return doExport(id, isImplicit, rs);
+                return doExport(isImplicit, rs).get(id);
             }
         }
 
         return null;
     }
 
-    public Geometry<?> doExport(long id, boolean isImplicit, ResultSet rs) throws ExportException, SQLException {
+    public Map<Long, Geometry<?>> doExport(Set<Long> ids) throws ExportException, SQLException {
+        return doExport(ids, false);
+    }
+
+    public Map<Long, Geometry<?>> doExport(Set<Long> ids, boolean isImplicit) throws ExportException, SQLException {
+        if (!ids.isEmpty()) {
+            setLongArrayOrNull(1, ids);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return doExport(isImplicit, rs);
+            }
+        } else {
+            return Collections.emptyMap();
+        }
+    }
+
+    private Map<Long, Geometry<?>> doExport(boolean isImplicit, ResultSet rs) throws ExportException, SQLException {
+        Map<Long, Geometry<?>> geometries = new HashMap<>();
+        while (rs.next()) {
+            long id = rs.getLong("id");
+            geometries.put(id, doExport(id, isImplicit, rs));
+        }
+
+        return geometries;
+    }
+
+    Geometry<?> doExport(long id, boolean isImplicit, ResultSet rs) throws ExportException, SQLException {
         Object geometryObject = isImplicit ?
                 rs.getObject("implicit_geometry") :
                 rs.getObject("geometry");
@@ -69,10 +87,10 @@ public class GeometryExporter extends DatabaseExporter {
                 if (geometry != null) {
                     if (!isImplicit) {
                         geometry.setSRID(helper.getSRID())
-                                .setSrsName(helper.getSrsName());
+                                .setSrsIdentifier(helper.getSrsIdentifier());
                     }
 
-                    return geometry.setDescriptor(GeometryDescriptor.of(id, rs.getLong("geometry_feature_id")));
+                    return geometry.setDescriptor(GeometryDescriptor.of(id, rs.getLong("feature_id")));
                 }
             } catch (GeometryException e) {
                 throw new ExportException("Failed to export geometry (ID: " + id + ").", e);

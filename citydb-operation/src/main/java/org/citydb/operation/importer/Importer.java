@@ -1,26 +1,11 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.importer;
 
+import org.citydb.core.cache.PersistentMapStore;
 import org.citydb.core.concurrent.CountLatch;
 import org.citydb.core.concurrent.ExecutorHelper;
 import org.citydb.database.adapter.DatabaseAdapter;
@@ -28,29 +13,37 @@ import org.citydb.model.feature.Feature;
 import org.citydb.model.feature.FeatureDescriptor;
 import org.citydb.operation.importer.reference.ReferenceManager;
 import org.citydb.operation.importer.util.ImportLogger;
-import org.citydb.operation.importer.util.StatisticsConsumer;
-import org.citydb.operation.util.FeatureStatistics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Consumer;
 
 public class Importer {
+    private final Logger logger = LoggerFactory.getLogger(Importer.class);
     private ExecutorService service;
+    private PersistentMapStore store;
     private ReferenceManager referenceManager;
     private ThreadLocal<ImportHelper> contexts;
     private Set<ImportHelper> helpers;
-    private ImportLogger logger;
-    private StatisticsConsumer statisticsConsumer;
+    private ImportLogger importLogger;
     private CountLatch countLatch;
     private Throwable exception;
-    private boolean autoCommit = true;
+    private TransactionMode transactionMode = TransactionMode.AUTO_COMMIT;
 
     private volatile State state = State.SESSION_NOT_STARTED;
     private volatile boolean shouldRun;
+
+    public enum TransactionMode {
+        AUTO_COMMIT,
+        AUTO_ROLLBACK,
+        NO_COMMIT
+    }
 
     public enum State {
         SESSION_NOT_STARTED,
@@ -66,30 +59,21 @@ public class Importer {
         return new Importer();
     }
 
-    public ImportLogger getImportLogger() {
-        return logger;
+    public Optional<ImportLogger> getImportLogger() {
+        return Optional.ofNullable(importLogger);
     }
 
-    public Importer setImportLogger(ImportLogger logger) {
-        this.logger = logger;
+    public Importer setImportLogger(ImportLogger importLogger) {
+        this.importLogger = importLogger;
         return this;
     }
 
-    public Consumer<FeatureStatistics> getFeatureStatisticsConsumer() {
-        return statisticsConsumer;
+    public TransactionMode getTransactionMode() {
+        return transactionMode;
     }
 
-    public Importer setFeatureStatisticsConsumer(StatisticsConsumer statisticsConsumer) {
-        this.statisticsConsumer = statisticsConsumer;
-        return this;
-    }
-
-    public boolean isAutoCommit() {
-        return autoCommit;
-    }
-
-    public Importer setAutoCommit(boolean autoCommit) {
-        this.autoCommit = autoCommit;
+    public Importer setTransactionMode(TransactionMode transactionMode) {
+        this.transactionMode = transactionMode;
         return this;
     }
 
@@ -110,7 +94,16 @@ public class Importer {
         Objects.requireNonNull(options, "The import options must not be null.");
 
         try {
-            referenceManager = ReferenceManager.newInstance(adapter, options);
+            store = PersistentMapStore.builder()
+                    .tempDirectory(options.getTempDirectory().orElse(null))
+                    .build();
+            logger.debug("Initialized cache for resolving references at {}.", store.getBackingFile());
+        } catch (IOException e) {
+            throw new ImportException("Failed to initialize local cache.", e);
+        }
+
+        try {
+            referenceManager = ReferenceManager.newInstance(adapter, store, options);
             helpers = ConcurrentHashMap.newKeySet();
             service = ExecutorHelper.newFixedAndBlockingThreadPool(options.getNumberOfThreads() > 0 ?
                     options.getNumberOfThreads() :
@@ -119,8 +112,8 @@ public class Importer {
             countLatch = new CountLatch();
             contexts = ThreadLocal.withInitial(() -> {
                 try {
-                    ImportHelper helper = new ImportHelper(adapter, options, referenceManager, logger,
-                            statisticsConsumer, autoCommit);
+                    ImportHelper helper = new ImportHelper(adapter, options, referenceManager, store,
+                            importLogger, transactionMode);
                     helpers.add(helper);
                     return helper;
                 } catch (Exception e) {
@@ -155,6 +148,8 @@ public class Importer {
             } else {
                 result.completeExceptionally(new ImportException("Illegal to import data outside a session."));
             }
+        } else {
+            result.cancel(true);
         }
 
         return result;
@@ -165,6 +160,8 @@ public class Importer {
                 || state == State.SESSION_COMMITTED
                 || state == State.SESSION_ABORTED) {
             return;
+        } else if (transactionMode == TransactionMode.AUTO_ROLLBACK) {
+            throw new ImportException("Illegal to commit a session in auto-rollback mode.");
         }
 
         try {
@@ -199,7 +196,7 @@ public class Importer {
             shouldRun = false;
             throw new ImportException("Failed to commit import session.", e);
         } finally {
-            service.shutdown();
+            close();
         }
     }
 
@@ -223,7 +220,12 @@ public class Importer {
             shouldRun = false;
             throw new ImportException("Failed to abort import session.", e);
         } finally {
-            service.shutdown();
+            close();
         }
+    }
+
+    private void close() {
+        service.shutdown();
+        store.close();
     }
 }

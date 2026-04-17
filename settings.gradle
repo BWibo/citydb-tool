@@ -1,5 +1,5 @@
 plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.7.0'
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 rootProject.name = 'citydb-tool'
 include 'citydb-cli'
@@ -9,7 +9,8 @@ include 'citydb-database'
 include 'citydb-database-postgres'
 include 'citydb-io'
 include 'citydb-io-citygml'
-include 'citydb-logging'
 include 'citydb-model'
 include 'citydb-operation'
 include 'citydb-plugin'
+include 'citydb-query'
+include 'citydb-util'

@@ -1,36 +1,23 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.adapter.appearance;
 
-import org.apache.logging.log4j.Level;
 import org.citydb.io.citygml.builder.ModelBuildException;
 import org.citydb.io.citygml.reader.ModelBuilderHelper;
 import org.citydb.io.citygml.serializer.ModelSerializeException;
 import org.citydb.io.citygml.writer.ModelSerializerHelper;
-import org.citydb.model.appearance.*;
+import org.citydb.model.appearance.Color;
+import org.citydb.model.appearance.Texture;
+import org.citydb.model.appearance.TextureType;
+import org.citydb.model.appearance.WrapMode;
 import org.citydb.model.common.ExternalFile;
-import org.citydb.model.common.Reference;
 import org.citygml4j.core.model.appearance.AbstractTexture;
 import org.citygml4j.core.model.appearance.ColorPlusOpacity;
+import org.slf4j.event.Level;
+import org.xmlobjects.gml.model.basictypes.Code;
 
 import java.io.IOException;
 
@@ -41,37 +28,21 @@ public abstract class TextureAdapter<T extends Texture<?>, R extends AbstractTex
         super.build(source, target, helper);
 
         if (source.getTextureType() != null) {
-            switch (source.getTextureType()) {
-                case SPECIFIC:
-                    target.setTextureType(TextureType.SPECIFIC);
-                    break;
-                case TYPICAL:
-                    target.setTextureType(TextureType.TYPICAL);
-                    break;
-                case UNKNOWN:
-                    target.setTextureType(TextureType.UNKNOWN);
-                    break;
-            }
+            target.setTextureType(switch (source.getTextureType()) {
+                case SPECIFIC -> TextureType.SPECIFIC;
+                case TYPICAL -> TextureType.TYPICAL;
+                case UNKNOWN -> TextureType.UNKNOWN;
+            });
         }
 
         if (source.getWrapMode() != null) {
-            switch (source.getWrapMode()) {
-                case NONE:
-                    target.setWrapMode(WrapMode.NONE);
-                    break;
-                case WRAP:
-                    target.setWrapMode(WrapMode.WRAP);
-                    break;
-                case CLAMP:
-                    target.setWrapMode(WrapMode.CLAMP);
-                    break;
-                case BORDER:
-                    target.setWrapMode(WrapMode.BORDER);
-                    break;
-                case MIRROR:
-                    target.setWrapMode(WrapMode.MIRROR);
-                    break;
-            }
+            target.setWrapMode(switch (source.getWrapMode()) {
+                case NONE -> WrapMode.NONE;
+                case WRAP -> WrapMode.WRAP;
+                case CLAMP -> WrapMode.CLAMP;
+                case BORDER -> WrapMode.BORDER;
+                case MIRROR -> WrapMode.MIRROR;
+            });
         }
 
         if (source.getBorderColor() != null) {
@@ -84,16 +55,11 @@ public abstract class TextureAdapter<T extends Texture<?>, R extends AbstractTex
         if (source.getImageURI() != null) {
             try {
                 ExternalFile textureImage = helper.getExternalFile(source.getImageURI());
-                if (helper.lookupAndPut(textureImage)) {
-                    target.setTextureImageProperty(TextureImageProperty.of(Reference.of(
-                            textureImage.getOrCreateObjectId())));
-                } else {
-                    if (source.getMimeType() != null && source.getMimeType().getValue() != null) {
-                        textureImage.setMimeType(source.getMimeType().getValue());
-                        textureImage.setMimeTypeCodeSpace(source.getMimeType().getCodeSpace());
-                    }
+                target.setTextureImage(textureImage);
 
-                    target.setTextureImageProperty(TextureImageProperty.of(textureImage));
+                if (source.getMimeType() != null && source.getMimeType().getValue() != null) {
+                    textureImage.setMimeType(source.getMimeType().getValue());
+                    textureImage.setMimeTypeCodeSpace(source.getMimeType().getCodeSpace());
                 }
             } catch (IOException e) {
                 helper.logOrThrow(Level.ERROR, helper.formatMessage(source, "Failed to read texture image file " +
@@ -115,14 +81,10 @@ public abstract class TextureAdapter<T extends Texture<?>, R extends AbstractTex
         source.getBorderColor().ifPresent(color -> target.setBorderColor(
                 new ColorPlusOpacity(color.getRed(), color.getGreen(), color.getBlue(), color.getAlpha())));
 
-        source.getTextureImageProperty().ifPresent(property -> {
-            ExternalFile textureImage = property.getObject()
-                    .orElseGet(() -> helper.lookupExternalFile(property.getReference()
-                            .map(Reference::getTarget)
-                            .orElse(null)));
-            if (textureImage != null) {
-                target.setImageURI(textureImage.getFileLocation());
-            }
+        source.getTextureImage().ifPresent(textureImage -> {
+            target.setImageURI(textureImage.getFileLocation());
+            textureImage.getMimeType().ifPresent(mimeType -> target.setMimeType(
+                    new Code(mimeType, textureImage.getMimeTypeCodeSpace().orElse(null))));
         });
     }
 }

@@ -1,71 +1,63 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter;
 
 import org.citydb.database.adapter.DatabaseAdapter;
 import org.citydb.database.schema.SchemaMapping;
+import org.citydb.database.srs.SpatialReference;
+import org.citydb.database.srs.SrsException;
+import org.citydb.database.util.OperationHelper;
 import org.citydb.model.address.Address;
 import org.citydb.model.appearance.SurfaceData;
 import org.citydb.model.common.ExternalFile;
-import org.citydb.model.common.Referencable;
 import org.citydb.model.feature.Feature;
 import org.citydb.model.geometry.ImplicitGeometry;
-import org.citydb.operation.exporter.feature.FeatureExporter;
+import org.citydb.model.util.IdCreator;
+import org.citydb.operation.exporter.feature.FeatureHierarchyExporter;
 import org.citydb.operation.exporter.geometry.ImplicitGeometryExporter;
-import org.citydb.operation.exporter.util.Postprocessor;
-import org.citydb.operation.exporter.util.SurfaceDataMapper;
-import org.citydb.operation.exporter.util.TableHelper;
+import org.citydb.operation.exporter.options.LodOptions;
+import org.citydb.operation.exporter.options.ValidityOptions;
+import org.citydb.operation.exporter.util.*;
+import org.citydb.sqlbuilder.query.Selection;
+import org.citydb.sqlbuilder.schema.Column;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.UUID;
 
 public class ExportHelper {
     private final DatabaseAdapter adapter;
     private final ExportOptions options;
     private final Connection connection;
-    private final Postprocessor postprocessor;
     private final SchemaMapping schemaMapping;
+    private final SpatialReference targetSrs;
+    private final ValidityFilter validityFilter;
+    private final LodFilter lodFilter;
+    private final Postprocessor postprocessor;
     private final TableHelper tableHelper;
-    private final int srid;
-    private final String srsName;
+    private final SurfaceDataMapper surfaceDataMapper = new SurfaceDataMapper();
     private final Set<String> featureIdCache = new HashSet<>();
     private final Set<String> surfaceDataIdCache = new HashSet<>();
     private final Set<String> implicitGeometryIdCache = new HashSet<>();
     private final Set<String> addressIdCache = new HashSet<>();
     private final Set<String> externalFileIdCache = new HashSet<>();
 
-    ExportHelper(DatabaseAdapter adapter, ExportOptions options) throws SQLException {
+    ExportHelper(DatabaseAdapter adapter, ExportOptions options) throws SQLException, SrsException {
         this.adapter = adapter;
         this.options = options;
 
         connection = adapter.getPool().getConnection();
-        postprocessor = new Postprocessor();
         schemaMapping = adapter.getSchemaAdapter().getSchemaMapping();
+        targetSrs = adapter.getGeometryAdapter().getSrsHelper().getSpatialReference(options.getTargetSrs().orElse(null))
+                .orElse(adapter.getDatabaseMetadata().getSpatialReference());
+        validityFilter = new ValidityFilter(options.getValidityOptions().orElseGet(ValidityOptions::new));
+        lodFilter = new LodFilter(options.getLodOptions().orElseGet(LodOptions::new));
+        postprocessor = new Postprocessor(this);
         tableHelper = new TableHelper(this);
-        srid = adapter.getDatabaseMetadata().getSpatialReference().getSRID();
-        srsName = adapter.getDatabaseMetadata().getSpatialReference().getURI();
     }
 
     public DatabaseAdapter getAdapter() {
@@ -84,34 +76,36 @@ public class ExportHelper {
         return connection;
     }
 
+    public ValidityFilter getValidityFilter() {
+        return validityFilter;
+    }
+
+    public LodFilter getLodFilter() {
+        return lodFilter;
+    }
+
     public SurfaceDataMapper getSurfaceDataMapper() {
-        return postprocessor.getSurfaceDataMapper();
+        return surfaceDataMapper;
     }
 
     public TableHelper getTableHelper() {
         return tableHelper;
     }
 
-    public int getSRID() {
-        return srid;
+    public OperationHelper getOperationHelper() {
+        return adapter.getSchemaAdapter().getOperationHelper();
     }
 
-    public String getSrsName() {
-        return srsName;
+    public int getSRID() {
+        return targetSrs.getSRID();
+    }
+
+    public String getSrsIdentifier() {
+        return targetSrs.getIdentifier();
     }
 
     public String createId() {
-        return "ID_" + UUID.randomUUID();
-    }
-
-    public String getOrCreateId(Referencable object) {
-        if (object.getObjectId().isPresent()) {
-            return object.getObjectId().get();
-        } else {
-            String objectId = createId();
-            object.setObjectId(objectId);
-            return objectId;
-        }
+        return IdCreator.getInstance().createId();
     }
 
     public boolean lookupAndPut(Feature feature) {
@@ -139,10 +133,22 @@ public class ExportHelper {
         return objectId != null && !externalFileIdCache.add(objectId);
     }
 
-    Feature exportFeature(long id) throws ExportException {
+    public Selection<?> getTransformOperator(Column column) {
+        return adapter.getDatabaseMetadata().getSpatialReference().getSRID() == getSRID() ?
+                column :
+                adapter.getGeometryAdapter().getSpatialOperationHelper()
+                        .transform(column, getSRID())
+                        .as(column.getName());
+    }
+
+    Feature exportFeature(long id, long sequenceId) throws ExportException {
         try {
-            Feature feature = tableHelper.getOrCreateExporter(FeatureExporter.class).doExport(id);
-            postprocessor.process(feature);
+            Feature feature = tableHelper.getOrCreateExporter(FeatureHierarchyExporter.class).doExport(id);
+            if (feature != null) {
+                feature.getDescriptor().ifPresent(descriptor -> descriptor.setSequenceId(sequenceId));
+                postprocessor.process(feature);
+            }
+
             return feature;
         } catch (Exception e) {
             throw new ExportException("Failed to export feature (ID: " + id + ").", e);
@@ -155,7 +161,10 @@ public class ExportHelper {
         try {
             ImplicitGeometry implicitGeometry = tableHelper.getOrCreateExporter(ImplicitGeometryExporter.class)
                     .doExport(id);
-            postprocessor.process(implicitGeometry);
+            if (implicitGeometry != null) {
+                postprocessor.process(implicitGeometry);
+            }
+
             return implicitGeometry;
         } catch (Exception e) {
             throw new ExportException("Failed to export implicit geometry (ID: " + id + ").", e);
@@ -165,6 +174,7 @@ public class ExportHelper {
     }
 
     private void clear() {
+        surfaceDataMapper.clear();
         featureIdCache.clear();
         surfaceDataIdCache.clear();
         implicitGeometryIdCache.clear();
@@ -173,7 +183,10 @@ public class ExportHelper {
     }
 
     protected void close() throws ExportException, SQLException {
-        tableHelper.close();
-        connection.close();
+        try {
+            tableHelper.close();
+        } finally {
+            connection.close();
+        }
     }
 }

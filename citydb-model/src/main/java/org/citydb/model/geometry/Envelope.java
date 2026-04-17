@@ -1,36 +1,21 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.model.geometry;
 
 import org.citydb.model.common.Child;
 
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 
-public class Envelope extends Child implements SRSReference {
+public class Envelope extends Child implements SpatialObject {
     private final Coordinate lowerCorner;
     private final Coordinate upperCorner;
     private Integer srid;
-    private String srsName;
+    private String srsIdentifier;
 
     private Envelope(Coordinate lowerCorner, Coordinate upperCorner) {
         this.lowerCorner = Objects.requireNonNull(lowerCorner, "The lower corner must not be null.");
@@ -41,6 +26,12 @@ public class Envelope extends Child implements SRSReference {
         return new Envelope(lowerCorner, upperCorner);
     }
 
+    public static Envelope empty() {
+        return new Envelope(
+                Coordinate.of(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE),
+                Coordinate.of(-Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE));
+    }
+
     public Coordinate getLowerCorner() {
         return lowerCorner;
     }
@@ -49,14 +40,15 @@ public class Envelope extends Child implements SRSReference {
         return upperCorner;
     }
 
-    public int getDimension() {
-        return (lowerCorner.getDimension() == 2 || upperCorner.getDimension() == 2) ? 2 : 3;
+    @Override
+    public int getVertexDimension() {
+        return lowerCorner.getDimension() == 2 || upperCorner.getDimension() == 2 ? 2 : 3;
     }
 
     @Override
     public Optional<Integer> getSRID() {
         if (srid == null) {
-            SRSReference parent = getInheritedSRSReference();
+            SrsReference parent = getInheritedSrsReference();
             if (parent != null) {
                 return parent.getSRID();
             }
@@ -72,20 +64,20 @@ public class Envelope extends Child implements SRSReference {
     }
 
     @Override
-    public Optional<String> getSrsName() {
-        if (srsName == null) {
-            SRSReference parent = getInheritedSRSReference();
+    public Optional<String> getSrsIdentifier() {
+        if (srsIdentifier == null) {
+            SrsReference parent = getInheritedSrsReference();
             if (parent != null) {
-                return parent.getSrsName();
+                return parent.getSrsIdentifier();
             }
         }
 
-        return Optional.ofNullable(srsName);
+        return Optional.ofNullable(srsIdentifier);
     }
 
     @Override
-    public Envelope setSrsName(String srsName) {
-        this.srsName = srsName;
+    public Envelope setSrsIdentifier(String srsIdentifier) {
+        this.srsIdentifier = srsIdentifier;
         return this;
     }
 
@@ -101,7 +93,7 @@ public class Envelope extends Child implements SRSReference {
                 (lowerCorner.getY() + upperCorner.getY()) / 2,
                 (lowerCorner.getZ() + upperCorner.getZ()) / 2);
 
-        return getDimension() == 2 ? center.force2D() : center;
+        return getVertexDimension() == 2 ? center.force2D() : center;
     }
 
     public boolean contains(Coordinate coordinate) {
@@ -110,7 +102,7 @@ public class Envelope extends Child implements SRSReference {
                 && coordinate.getY() >= lowerCorner.getY()
                 && coordinate.getY() <= upperCorner.getY();
 
-        if (contains && coordinate.getDimension() == 3 && getDimension() == 3) {
+        if (contains && coordinate.getDimension() == 3 && getVertexDimension() == 3) {
             contains = coordinate.getZ() >= lowerCorner.getZ()
                     && coordinate.getZ() <= upperCorner.getZ();
         }
@@ -128,7 +120,7 @@ public class Envelope extends Child implements SRSReference {
                 && coordinate.getY() > lowerCorner.getY()
                 && coordinate.getY() < upperCorner.getY();
 
-        if (within && coordinate.getDimension() == 3 && getDimension() == 3) {
+        if (within && coordinate.getDimension() == 3 && getVertexDimension() == 3) {
             within = coordinate.getZ() > lowerCorner.getZ()
                     && coordinate.getZ() < upperCorner.getZ();
         }
@@ -146,7 +138,7 @@ public class Envelope extends Child implements SRSReference {
                 || envelope.lowerCorner.getY() > upperCorner.getY()
                 || envelope.upperCorner.getY() < lowerCorner.getY();
 
-        if (!disconnected && envelope.getDimension() == 3 && getDimension() == 3) {
+        if (!disconnected && envelope.getVertexDimension() == 3 && getVertexDimension() == 3) {
             disconnected = envelope.lowerCorner.getZ() > upperCorner.getZ()
                     || envelope.upperCorner.getZ() < lowerCorner.getZ();
         }
@@ -154,42 +146,94 @@ public class Envelope extends Child implements SRSReference {
         return !disconnected;
     }
 
-    public Envelope include(Coordinate coordinate) {
-        if (coordinate.getX() < lowerCorner.getX()) {
-            lowerCorner.setX(coordinate.getX());
+    public boolean isOnTile(Envelope envelope) {
+        return isOnTile(envelope.getCenter());
+    }
+
+    public boolean isOnTile(Coordinate point) {
+        return point.getX() > lowerCorner.getX()
+                && point.getX() <= upperCorner.getX()
+                && point.getY() > lowerCorner.getY()
+                && point.getY() <= upperCorner.getY();
+    }
+
+    public Envelope include(double x, double y) {
+        if (x < lowerCorner.getX()) {
+            lowerCorner.setX(x);
         }
 
-        if (coordinate.getY() < lowerCorner.getY()) {
-            lowerCorner.setY(coordinate.getY());
+        if (y < lowerCorner.getY()) {
+            lowerCorner.setY(y);
         }
 
-        if (coordinate.getX() > upperCorner.getX()) {
-            upperCorner.setX(coordinate.getX());
+        if (x > upperCorner.getX()) {
+            upperCorner.setX(x);
         }
 
-        if (coordinate.getY() > upperCorner.getY()) {
-            upperCorner.setY(coordinate.getY());
-        }
-
-        if (coordinate.getDimension() == 3 && getDimension() == 3) {
-            if (coordinate.getZ() < lowerCorner.getZ()) {
-                lowerCorner.setZ(coordinate.getZ());
-            }
-
-            if (coordinate.getZ() > upperCorner.getZ()) {
-                upperCorner.setZ(coordinate.getZ());
-            }
+        if (y > upperCorner.getY()) {
+            upperCorner.setY(y);
         }
 
         return this;
     }
 
+    public Envelope include(double x, double y, double z) {
+        include(x, y);
+
+        if (z < lowerCorner.getZ()) {
+            lowerCorner.setZ(z);
+        }
+
+        if (z > upperCorner.getZ()) {
+            upperCorner.setZ(z);
+        }
+
+        return this;
+    }
+
+    public Envelope include(Coordinate coordinate) {
+        return coordinate.getDimension() == 2 ?
+                include(coordinate.getX(), coordinate.getY()) :
+                include(coordinate.getX(), coordinate.getY(), coordinate.getZ());
+    }
+
     public Envelope include(Envelope envelope) {
-        return include(envelope.lowerCorner)
-                .include(envelope.upperCorner);
+        if (!envelope.isEmpty()) {
+            include(envelope.lowerCorner)
+                    .include(envelope.upperCorner);
+        }
+
+        return this;
     }
 
     public Envelope include(Geometry<?> geometry) {
         return include(geometry.getEnvelope());
+    }
+
+    public boolean isEmpty() {
+        boolean isEmpty = lowerCorner.getX() == Double.MAX_VALUE
+                && lowerCorner.getY() == Double.MAX_VALUE
+                && upperCorner.getX() == -Double.MAX_VALUE
+                && upperCorner.getY() == -Double.MAX_VALUE;
+
+        if (getVertexDimension() == 3) {
+            isEmpty &= lowerCorner.getZ() == Double.MAX_VALUE
+                    && upperCorner.getZ() == -Double.MAX_VALUE;
+        }
+
+        return isEmpty;
+    }
+
+    public Polygon convertToPolygon() {
+        Coordinate lowerRight = Coordinate.of(upperCorner.getX(), lowerCorner.getY());
+        Coordinate upperLeft = Coordinate.of(lowerCorner.getX(), upperCorner.getY());
+        if (getVertexDimension() == 3) {
+            lowerRight.setZ(lowerCorner.getZ());
+            upperLeft.setZ(upperCorner.getZ());
+        }
+
+        return Polygon.of(LinearRing.of(Arrays.asList(lowerCorner, lowerRight, upperCorner, upperLeft, lowerCorner)))
+                .setSRID(srid)
+                .setSrsIdentifier(srsIdentifier);
     }
 }

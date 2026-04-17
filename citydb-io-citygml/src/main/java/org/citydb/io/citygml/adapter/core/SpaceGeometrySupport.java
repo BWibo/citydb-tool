@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.adapter.core;
@@ -241,7 +225,7 @@ public class SpaceGeometrySupport<T extends AbstractSpace> {
         this.lod2ImplicitRepresentation = lod2ImplicitRepresentation;
         return this;
     }
-    
+
     boolean supportsLod3ImplicitRepresentation(CityGMLVersion version, T target) {
         return lod3ImplicitRepresentation != null && lod3ImplicitRepresentation.apply(version, target);
     }
@@ -249,7 +233,7 @@ public class SpaceGeometrySupport<T extends AbstractSpace> {
     public SpaceGeometrySupport<T> withLod3ImplicitRepresentation() {
         return withLod3ImplicitRepresentation((version, target) -> true);
     }
-    
+
     public SpaceGeometrySupport<T> withLod3ImplicitRepresentation(BiFunction<CityGMLVersion, T, Boolean> lod3ImplicitRepresentation) {
         this.lod3ImplicitRepresentation = lod3ImplicitRepresentation;
         return this;

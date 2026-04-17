@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.writer;
@@ -26,8 +10,12 @@ import org.citydb.io.writer.WriteException;
 import org.citydb.io.writer.WriteOptions;
 import org.citygml4j.xml.CityGMLContext;
 import org.citygml4j.xml.module.citygml.CoreModule;
+import org.citygml4j.xml.transform.TransformerPipeline;
 
+import javax.xml.transform.stream.StreamSource;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 
 public class CityGMLWriterFactory {
@@ -54,10 +42,26 @@ public class CityGMLWriterFactory {
                     .setDefaultNamespace(CoreModule.of(formatOptions.getVersion()).getNamespaceURI())
                     .setIndent(formatOptions.isPrettyPrint() ? "  " : null);
 
+            if (formatOptions.hasXslTransforms()) {
+                writer.setTransformer(getTransformer(formatOptions.getXslTransforms()));
+            }
+
             writer.writeHeader();
             return writer;
         } catch (Exception e) {
             throw new WriteException("Failed to create CityGML writer.", e);
+        }
+    }
+
+    private TransformerPipeline getTransformer(List<String> stylesheets) throws WriteException {
+        try {
+            return TransformerPipeline.newInstance(stylesheets.stream()
+                    .map(Path::of)
+                    .map(Path::toFile)
+                    .map(StreamSource::new)
+                    .toArray(StreamSource[]::new));
+        } catch (Exception e) {
+            throw new WriteException("Failed to build XSL transformation pipeline.", e);
         }
     }
 }

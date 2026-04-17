@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.core.file;
@@ -27,6 +11,7 @@ import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -41,8 +26,8 @@ public class FileLocator {
 
     private FileLocator(Path path) {
         this.path = Objects.requireNonNull(path, "The path must not be null.")
-                .normalize()
-                .toAbsolutePath();
+                .toAbsolutePath()
+                .normalize();
         url = null;
     }
 
@@ -55,18 +40,16 @@ public class FileLocator {
     }
 
     public static FileLocator of(String location) {
-        try {
-            return FileLocator.of(new URL(location));
-        } catch (Exception e) {
-            return new FileLocator(Path.of(location));
-        }
+        URL url = parseURL(location);
+        return url != null ?
+                new FileLocator(url) :
+                new FileLocator(Path.of(location));
     }
 
     public static FileLocator of(InputFile file, String location) throws IOException {
-        try {
-            return FileLocator.of(new URL(location));
-        } catch (Exception e) {
-            //
+        URL url = parseURL(location);
+        if (url != null) {
+            return FileLocator.of(url);
         }
 
         if ("/".equals(file.getSeparator())) {
@@ -88,10 +71,8 @@ public class FileLocator {
             }
         }
 
-        if (path == null || !Files.exists(path)) {
+        if (path == null) {
             throw new IOException("Failed to find file at " + location + ".");
-        } else if (Files.size(path) == 0) {
-            throw new IOException("The file " + location + " has zero bytes.");
         }
 
         return FileLocator.of(path);
@@ -111,8 +92,26 @@ public class FileLocator {
                 Files.newInputStream(path));
     }
 
+    public String getFileLocation() {
+        return path != null ? path.toString() : url.toExternalForm();
+    }
+
     public String getFileName() {
-        return path != null ? path.getFileName().toString() : url.getFile();
+        return path != null ?
+                path.getFileName().toString() :
+                Paths.get(url.getPath()).getFileName().toString();
+    }
+
+    private static URL parseURL(String location) {
+        if (location.indexOf("://") > 0) {
+            try {
+                return new URL(location);
+            } catch (Exception e) {
+                //
+            }
+        }
+
+        return null;
     }
 
     @Override

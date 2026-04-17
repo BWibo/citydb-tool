@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter.common;
@@ -28,6 +12,7 @@ import com.alibaba.fastjson2.JSONReader;
 import org.citydb.database.adapter.DatabaseAdapter;
 import org.citydb.database.geometry.GeometryException;
 import org.citydb.database.schema.SchemaMapping;
+import org.citydb.database.util.OperationHelper;
 import org.citydb.model.appearance.Color;
 import org.citydb.model.common.Name;
 import org.citydb.model.geometry.Envelope;
@@ -41,20 +26,27 @@ import org.citydb.operation.exporter.util.TableHelper;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collection;
 
 public abstract class DatabaseExporter {
     protected final ExportHelper helper;
     protected final DatabaseAdapter adapter;
     protected final SchemaMapping schemaMapping;
     protected final TableHelper tableHelper;
+    protected final OperationHelper operationHelper;
 
     protected PreparedStatement stmt;
 
     public DatabaseExporter(ExportHelper helper) {
         this.helper = helper;
-        this.adapter = helper.getAdapter();
-        this.schemaMapping = helper.getSchemaMapping();
-        this.tableHelper = helper.getTableHelper();
+        adapter = helper.getAdapter();
+        schemaMapping = helper.getSchemaMapping();
+        tableHelper = helper.getTableHelper();
+        operationHelper = helper.getOperationHelper();
+    }
+
+    protected void setLongArrayOrNull(int index, Collection<Long> values) throws SQLException {
+        adapter.getSchemaAdapter().getSqlHelper().setLongArrayOrNull(stmt, index, values);
     }
 
     protected Long getLong(String column, ResultSet rs) throws SQLException {
@@ -73,11 +65,11 @@ public abstract class DatabaseExporter {
     }
 
     protected JSONObject getJSONObject(String content) {
-        return JSON.parseObject(content, JSONReader.Feature.UseBigDecimalForDoubles);
+        return JSON.parseObject(content, JSONReader.Feature.UseDoubleForDecimals);
     }
 
     protected JSONArray getJSONArray(String content) {
-        return JSON.parseArray(content, JSONReader.Feature.UseBigDecimalForDoubles);
+        return JSON.parseArray(content, JSONReader.Feature.UseDoubleForDecimals);
     }
 
     protected Name getName(String nameColumn, String namespaceIdColumn, ResultSet rs) throws SQLException {
@@ -123,7 +115,7 @@ public abstract class DatabaseExporter {
             return geometryObject != null ?
                     adapter.getGeometryAdapter().getGeometry(geometryObject)
                             .setSRID(helper.getSRID())
-                            .setSrsName(helper.getSrsName()) :
+                            .setSrsIdentifier(helper.getSrsIdentifier()) :
                     null;
         } catch (GeometryException e) {
             throw new ExportException("Failed to convert database geometry.", e);

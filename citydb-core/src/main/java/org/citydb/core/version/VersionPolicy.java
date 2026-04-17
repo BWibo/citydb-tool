@@ -1,0 +1,150 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
+ */
+
+package org.citydb.core.version;
+
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class VersionPolicy {
+    private static final Pattern policyPattern = Pattern.compile("^(\\d+)\\.(\\d+)(?:\\.(\\d+)(\\+)?)?$");
+
+    private final Version lowerBound;
+    private final Version upperBound;
+    private final boolean allowNewerRevisions;
+
+    private VersionPolicy(Version lowerBound, Version upperBound, boolean allowNewerRevisions) {
+        this.lowerBound = lowerBound;
+        this.upperBound = upperBound;
+        this.allowNewerRevisions = allowNewerRevisions;
+    }
+
+    private VersionPolicy(Version lowerBound, Version upperBound) {
+        this(lowerBound, upperBound, false);
+    }
+
+    public static VersionPolicy at(int major, int minor) {
+        return at(major, minor, 0).allowNewerRevisions();
+    }
+
+    public static VersionPolicy at(int major, int minor, int revision) {
+        Version version = Version.of(major, minor, revision);
+        return new VersionPolicy(version, version);
+    }
+
+    public static VersionPolicyBuilder from(int major, int minor, int revision) {
+        return new VersionPolicyBuilder(Version.of(major, minor, revision));
+    }
+
+    public static Optional<VersionPolicy> parse(String policy) {
+        if (policy != null) {
+            String[] parts = policy.split("-");
+            if (parts.length < 3) {
+                Matcher matcher = policyPattern.matcher(parts.length == 2 ? parts[1].trim() : parts[0].trim());
+                if (matcher.matches()) {
+                    String revision = matcher.group(3);
+                    Version upperBound = Version.of(
+                            Integer.parseInt(matcher.group(1)),
+                            Integer.parseInt(matcher.group(2)),
+                            revision != null ? Integer.parseInt(revision) : 0);
+                    Version lowerBound = parts.length == 2 ? Version.parse(parts[0]).orElse(null) : upperBound;
+                    if (lowerBound != null) {
+                        return Optional.of(new VersionPolicy(lowerBound, upperBound,
+                                revision == null || matcher.group(4) != null));
+                    }
+                }
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public VersionPolicy allowNewerRevisions() {
+        return allowNewerRevisions ? this : new VersionPolicy(lowerBound, upperBound, true);
+    }
+
+    public Version getLowerBound() {
+        return lowerBound;
+    }
+
+    public Version getUpperBound() {
+        return upperBound;
+    }
+
+    public boolean isAllowNewerRevisions() {
+        return allowNewerRevisions;
+    }
+
+    public boolean matches(Version version) {
+        if (lowerBound.equals(upperBound)) {
+            return allowNewerRevisions ?
+                    version.compareTo(lowerBound, true) == 0 && version.getRevision() >= lowerBound.getRevision() :
+                    version.equals(lowerBound);
+        } else {
+            return version.compareTo(lowerBound) >= 0
+                    && version.compareTo(upperBound, true) <= 0
+                    && (allowNewerRevisions || version.getRevision() <= upperBound.getRevision());
+        }
+    }
+
+    private String toVersionString(Version version) {
+        return allowNewerRevisions ?
+                version.toVersionString() + "+" :
+                version.toVersionString();
+    }
+
+    @Override
+    public int hashCode() {
+        return toString().hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        } else if (!(obj instanceof VersionPolicy policy)) {
+            return false;
+        } else {
+            return toString().equals(policy.toString());
+        }
+    }
+
+    @Override
+    public String toString() {
+        return lowerBound.compareTo(upperBound, allowNewerRevisions) == 0 ?
+                toVersionString(lowerBound) :
+                lowerBound.toVersionString() + " - " + toVersionString(upperBound);
+    }
+
+    public static class VersionPolicyBuilder {
+        private final Version lower;
+
+        private VersionPolicyBuilder(Version lower) {
+            this.lower = lower;
+        }
+
+        public VersionPolicy to(int major, int minor) {
+            return lower.getMajor() == major && lower.getMinor() == minor ?
+                    to(Version.of(major, minor, lower.getRevision()), true) :
+                    to(Version.of(major, minor, 0), true);
+        }
+
+        public VersionPolicy to(int major, int minor, int revision) {
+            return to(Version.of(major, minor, revision), false);
+        }
+
+        private VersionPolicy to(Version upper, boolean allowNewerRevision) {
+            if (upper.compareTo(lower) < 0) {
+                throw new IllegalArgumentException("Invalid version range: " + lower + " > " +
+                        upper.toVersionString(allowNewerRevision) + ".");
+            }
+
+            return allowNewerRevision ?
+                    new VersionPolicy(lower, upper).allowNewerRevisions() :
+                    new VersionPolicy(lower, upper);
+        }
+    }
+}

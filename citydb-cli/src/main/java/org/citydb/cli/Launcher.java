@@ -1,59 +1,43 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.cli;
 
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
-import org.citydb.cli.command.Command;
+import org.citydb.cli.common.Command;
+import org.citydb.cli.common.ConfigOption;
+import org.citydb.cli.common.Option;
+import org.citydb.cli.connect.ConnectCommand;
 import org.citydb.cli.deleter.DeleteCommand;
 import org.citydb.cli.exporter.ExportCommand;
 import org.citydb.cli.extension.MainCommand;
 import org.citydb.cli.importer.ImportCommand;
 import org.citydb.cli.index.IndexCommand;
-import org.citydb.cli.option.ConfigOption;
-import org.citydb.cli.option.Option;
+import org.citydb.cli.info.InfoCommand;
+import org.citydb.cli.logging.LoggerManager;
 import org.citydb.cli.util.CommandHelper;
 import org.citydb.cli.util.PidFile;
 import org.citydb.config.Config;
 import org.citydb.config.ConfigManager;
-import org.citydb.core.CoreConstants;
 import org.citydb.database.DatabaseConstants;
-import org.citydb.logging.LoggerManager;
 import org.citydb.plugin.Extension;
 import org.citydb.plugin.Plugin;
 import org.citydb.plugin.PluginManager;
 import picocli.CommandLine;
 
-import java.io.Console;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @CommandLine.Command(
@@ -61,6 +45,7 @@ import java.util.stream.Collectors;
         scope = CommandLine.ScopeType.INHERIT,
         description = "Command-line interface for the 3D City Database.",
         synopsisSubcommandLabel = "COMMAND",
+        abbreviateSynopsis = true,
         mixinStandardHelpOptions = true,
         versionProvider = Launcher.class,
         showAtFileInUsageHelp = true,
@@ -74,12 +59,16 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
     private Path configFile;
 
     @CommandLine.Option(names = {"-L", "--log-level"}, scope = CommandLine.ScopeType.INHERIT, paramLabel = "<level>",
-            defaultValue = "info", description = "Log level: ${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE}).")
-    private LogLevel logLevel;
+            description = "Log level: ${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE}).")
+    private LogLevel logLevel = LogLevel.info;
 
     @CommandLine.Option(names = "--log-file", scope = CommandLine.ScopeType.INHERIT, paramLabel = "<file>",
             description = "Write log messages to this file.")
     private Path logFile;
+
+    @CommandLine.Option(names = "--quiet", scope = CommandLine.ScopeType.INHERIT,
+            description = "Disable console log messages.")
+    private boolean quiet;
 
     @CommandLine.Option(names = "--pid-file", scope = CommandLine.ScopeType.INHERIT, paramLabel = "<file>",
             description = "Create a file containing the process ID.")
@@ -89,15 +78,15 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
             description = "Load plugins from this directory.")
     private Path pluginsDirectory;
 
-    @CommandLine.Option(names = "--use-plugins", scope = CommandLine.ScopeType.INHERIT, split = ",",
-            paramLabel = "<plugin[=true|false]", mapFallbackValue = "true",
+    @CommandLine.Option(names = "--use-plugin", scope = CommandLine.ScopeType.INHERIT, split = ",",
+            paramLabel = "<plugin[=true|false]>", mapFallbackValue = "true",
             description = "Enable or disable plugins with a matching fully qualified class name " +
                     "(default: ${MAP-FALLBACK-VALUE}).")
     private Map<String, Boolean> usePlugins;
 
     private final Logger logger = LoggerManager.getInstance().getLogger(Launcher.class);
     private final PluginManager pluginManager = PluginManager.getInstance();
-    private final CommandHelper helper = CommandHelper.newInstance();
+    private final CommandHelper helper = CommandHelper.getInstance();
     private final Config config = new Config();
     private String commandLine;
     private String subCommandName;
@@ -112,18 +101,16 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
         }
     }
 
-    private int execute(String[] args) throws Exception {
+    public int execute(String[] args) throws Exception {
         Instant start = Instant.now();
         int exitCode = CommandLine.ExitCode.SOFTWARE;
 
         System.setProperty("picocli.disable.closures", "true");
-        CommandLine cmd = new CommandLine(this)
-                .setCaseInsensitiveEnumValuesAllowed(true)
-                .setAbbreviatedOptionsAllowed(true)
-                .setAbbreviatedSubcommandsAllowed(true)
-                .setExecutionStrategy(new CommandLine.RunAll());
+        CommandLine cmd = new CommandLine(this);
 
         pluginManager.load(parsePluginsDirectory(args));
+        Command.addSubcommand(new ConnectCommand(), cmd, pluginManager);
+        Command.addSubcommand(new InfoCommand(), cmd, pluginManager);
         Command.addSubcommand(new ImportCommand(), cmd, pluginManager);
         Command.addSubcommand(new ExportCommand(), cmd, pluginManager);
         Command.addSubcommand(new DeleteCommand(), cmd, pluginManager);
@@ -133,9 +120,13 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
         }
 
         try {
-            CommandLine.ParseResult parseResult = cmd.parseArgs(args);
-            List<CommandLine> commandLines = parseResult.asCommandLineList();
+            CommandLine.ParseResult parseResult = cmd.setCaseInsensitiveEnumValuesAllowed(true)
+                    .setAbbreviatedOptionsAllowed(true)
+                    .setAbbreviatedSubcommandsAllowed(true)
+                    .setExecutionStrategy(new CommandLine.RunAll())
+                    .parseArgs(args);
 
+            List<CommandLine> commandLines = parseResult.asCommandLineList();
             for (CommandLine commandLine : commandLines) {
                 if (commandLine.isUsageHelpRequested() || commandLine.isVersionHelpRequested()) {
                     return CommandLine.executeHelpRequest(parseResult);
@@ -153,6 +144,8 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
                     plugin.setEnabled(usePlugins.getOrDefault(plugin.getClass().getName(), plugin.isEnabled()));
                 }
             }
+
+            initializeLogging();
 
             for (CommandLine commandLine : commandLines) {
                 Object command = commandLine.getCommand();
@@ -187,26 +180,25 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
                 if (command instanceof Command) {
                     ((Command) command).preprocess(commandLine);
                 }
-
-                CommandLine.Model.OptionSpec password = commandLine.getParseResult().matchedOption("--db-password");
-                if (password != null && password.getValue().equals("")) {
-                    password.setValue(readPassword(commandLine.getParseResult().matchedOptionValue("--db-username",
-                            System.getenv(DatabaseConstants.ENV_CITYDB_USERNAME))));
-                }
             }
 
             commandLine = CliConstants.APP_COMMAND + " " + String.join(" ", args);
             subCommandName = commandLines.subList(1, commandLines.size()).stream()
                     .map(CommandLine::getCommandName)
                     .collect(Collectors.joining(" "));
-            exitCode = cmd.getExecutionStrategy().execute(parseResult);
 
-            logger.info("Total execution time: " + formatElapsedTime(Duration.between(start, Instant.now())) + ".");
+            try {
+                exitCode = cmd.getExecutionStrategy().execute(parseResult);
+            } finally {
+                helper.disconnect();
+            }
+
+            logger.info("Total execution time: {}.", formatElapsedTime(Duration.between(start, Instant.now())));
 
             if (exitCode == CommandLine.ExitCode.OK) {
-                logger.info(CliConstants.APP_COMMAND + " successfully completed.");
+                logger.info("{} successfully completed.", CliConstants.APP_COMMAND);
             } else {
-                logger.warn(CliConstants.APP_COMMAND + " execution failed.");
+                logger.warn("{} execution failed.", CliConstants.APP_COMMAND);
             }
         } catch (CommandLine.ParameterException e) {
             cmd.getParameterExceptionHandler().handleParseException(e, args);
@@ -222,20 +214,19 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
 
     @Override
     public Integer call() throws ExecutionException {
-        initializeLogging();
-        logger.info("Starting " + CliConstants.APP_NAME + ", " + "version " + CliConstants.APP_VERSION + ".");
+        logger.info("Starting {}, version {}.", CliConstants.APP_NAME, CliConstants.APP_VERSION);
 
         if (pidFile != null) {
-            createPidFile();
+            createPidFile(helper.resolveAgainstWorkingDir(pidFile));
         }
 
         if (configFile != null) {
-            loadConfig();
+            loadConfig(helper.resolveAgainstWorkingDir(configFile));
         }
 
         loadPlugins();
 
-        logger.info("Executing '" + subCommandName + "' command.");
+        logger.info("Executing '{}' command.", subCommandName);
         return CommandLine.ExitCode.OK;
     }
 
@@ -246,36 +237,37 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
                 .setLogPattern(logLevel.level.isMoreSpecificThan(Level.INFO) ?
                         manager.logConsole().getLogPattern() + "%ex{0}" :
                         manager.logConsole().getLogPattern())
-                .setEnabled(true)
-                .configure();
+                .setEnabled(!quiet)
+                .reconfigure();
 
         if (logFile != null) {
+            logFile = helper.resolveAgainstWorkingDir(logFile);
             if (Files.isDirectory(logFile)) {
-                logFile = logFile.resolve(manager.logFile().getPath());
+                logFile = logFile.resolve(LoggerManager.DEFAULT_LOG_FILE);
             }
 
-            logger.debug("Writing log messages to " + logFile.toAbsolutePath() + ".");
+            logger.debug("Writing log messages to {}.", logFile);
             manager.logFile()
                     .setLogLevel(logLevel.level)
                     .setPath(logFile)
                     .setEnabled(true)
-                    .configure();
+                    .reconfigure();
         }
     }
 
-    private void createPidFile() throws ExecutionException {
+    private void createPidFile(Path file) throws ExecutionException {
         try {
-            logger.debug("Creating PID file at " + pidFile.toAbsolutePath() + ".");
-            PidFile.create(pidFile, true);
+            logger.debug("Creating PID file at {}.", file);
+            PidFile.create(file, true);
         } catch (IOException e) {
             throw new ExecutionException("Failed to create PID file.", e);
         }
     }
 
-    private void loadConfig() throws ExecutionException {
-        logger.info("Loading configuration from file " + configFile + "...");
+    private void loadConfig(Path file) throws ExecutionException {
         try {
-            config.putAll(ConfigManager.newInstance().read(configFile, Config.class, Config::new));
+            logger.info("Loading configuration from file {}...", file);
+            config.putAll(ConfigManager.newInstance().read(file, Config.class, Config::new));
         } catch (Exception e) {
             throw new ExecutionException("Failed to load config file.", e);
         }
@@ -287,9 +279,9 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
             for (Plugin plugin : pluginManager.getPlugins()) {
                 String name = "\"" + plugin.getMetadata().getName() + "\" (" + plugin.getClass().getName() + ")";
                 if (plugin.isEnabled()) {
-                    logger.info("Loaded plugin " + name + ".");
+                    logger.info("Loaded plugin {}.", name);
                 } else {
-                    logger.debug("Disabling plugin " + name + ".");
+                    logger.debug("Disabling plugin {}.", name);
                 }
             }
         } else {
@@ -298,26 +290,6 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
                     .forEach(e -> logger.error(e.getMessage(), e.getCause()));
 
             throw new ExecutionException("Failed to load plugins.");
-        }
-    }
-
-    private String readPassword(String user) throws ExecutionException {
-        String prompt = "Enter password for " + user;
-        Console console = System.console();
-        if (console != null) {
-            char[] input = console.readPassword(prompt + ": ");
-            return input != null ? new String(input) : null;
-        } else {
-            ExecutorService service = Executors.newFixedThreadPool(1);
-            try {
-                System.out.print(prompt + " (will timeout in 60s): ");
-                return service.submit(() -> new Scanner(System.in).nextLine())
-                        .get(60, TimeUnit.SECONDS);
-            } catch (Throwable e) {
-                throw new ExecutionException("Failed to read password from console.", e);
-            } finally {
-                service.shutdown();
-            }
         }
     }
 
@@ -336,13 +308,13 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
         }
 
         return pluginsDirectory != null ?
-                CoreConstants.WORKING_DIR.resolve(pluginsDirectory) :
-                CoreConstants.APP_HOME.resolve(CliConstants.PLUGINS_DIR);
+                CliConstants.WORKING_DIR.resolve(pluginsDirectory) :
+                CliConstants.APP_HOME.resolve(CliConstants.PLUGINS_DIR);
     }
 
     private void logException(Throwable e) {
         helper.logException(e);
-        logger.warn(CliConstants.APP_COMMAND + " execution failed.");
+        logger.warn("{} execution failed.", CliConstants.APP_COMMAND);
     }
 
     private String formatElapsedTime(Duration elapsed) {
@@ -379,7 +351,8 @@ public class Launcher implements Command, CommandLine.IVersionProvider {
 
     @Override
     public String[] getVersion() {
-        return new String[]{CliConstants.APP_NAME + ", version " + CliConstants.APP_VERSION,
-                "(C) " + CliConstants.APP_COPYRIGHT_YEAR + " " + CliConstants.APP_VENDOR};
+        return new String[]{CliConstants.APP_NAME + " " + CliConstants.APP_VERSION,
+                "Supports " + DatabaseConstants.CITYDB_SHORT_NAME + " versions " + DatabaseConstants.VERSION_SUPPORT,
+                "Copyright (C) " + CliConstants.APP_COPYRIGHT_YEAR + " " + CliConstants.APP_VENDOR + "\n"};
     }
 }

@@ -1,28 +1,10 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader;
 
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
 import org.citydb.core.cache.PersistentMapStore;
 import org.citydb.core.file.FileLocator;
 import org.citydb.core.file.InputFile;
@@ -35,23 +17,30 @@ import org.citydb.io.citygml.adapter.geometry.builder.Lod;
 import org.citydb.io.citygml.adapter.gml.CodeAdapter;
 import org.citydb.io.citygml.builder.ModelBuildException;
 import org.citydb.io.citygml.builder.ModelBuilder;
+import org.citydb.io.citygml.reader.options.FormatOptions;
 import org.citydb.io.citygml.reader.util.FeatureHelper;
 import org.citydb.io.citygml.reader.util.FileMetadata;
 import org.citydb.io.reader.ReadOptions;
-import org.citydb.logging.LoggerManager;
+import org.citydb.io.reader.options.ImplicitGeometryScope;
 import org.citydb.model.address.Address;
 import org.citydb.model.appearance.Appearance;
-import org.citydb.model.common.*;
+import org.citydb.model.common.Child;
+import org.citydb.model.common.ExternalFile;
+import org.citydb.model.common.Name;
 import org.citydb.model.feature.Feature;
 import org.citydb.model.geometry.Geometry;
 import org.citydb.model.geometry.ImplicitGeometry;
 import org.citydb.model.property.*;
 import org.citygml4j.core.model.CityGMLVersion;
+import org.citygml4j.core.model.appearance.AbstractSurfaceData;
 import org.citygml4j.core.model.core.AbstractAppearance;
 import org.citygml4j.core.model.core.AbstractAppearanceProperty;
 import org.citygml4j.core.model.core.AbstractFeature;
 import org.citygml4j.core.model.core.StandardObjectClassifier;
 import org.citygml4j.xml.module.Module;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.xmlobjects.XMLObjects;
 import org.xmlobjects.gml.model.base.AbstractGML;
 import org.xmlobjects.gml.model.base.AbstractInlineOrByReferenceProperty;
@@ -67,27 +56,30 @@ import org.xmlobjects.xml.Namespaces;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.IdentityHashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.Consumer;
 
 public class ModelBuilderHelper {
-    private final Logger logger = LoggerManager.getInstance().getLogger(ModelBuilderHelper.class);
+    private final Logger logger = LoggerFactory.getLogger(ModelBuilderHelper.class);
     private final InputFile file;
     private final PersistentMapStore store;
     private final CityGMLAdapterContext context;
     private final AppearanceHelper appearanceHelper;
     private final GeometryHelper geometryHelper;
     private final Map<Class<?>, ModelBuilder<?, ?>> builderCache = new IdentityHashMap<>();
+    private final Set<String> featureIdCache = new HashSet<>();
+    private final Set<String> surfaceDataIdCache = new HashSet<>();
+    private final Set<String> geometryIdCache = new HashSet<>();
+    private final Set<String> addressIdCache = new HashSet<>();
+    private final Set<String> externalFileIdCache = new HashSet<>();
 
     private CityGMLVersion version;
     private String encoding;
     private String rootSrsName;
     private boolean failFast;
     private boolean computeEnvelopes;
-    private boolean importXALSource;
+    private boolean includeXALSource;
+    private ImplicitGeometryScope implicitGeometryScope;
 
     ModelBuilderHelper(InputFile file, PersistentMapStore store, CityGMLAdapterContext context) {
         this.file = Objects.requireNonNull(file, "The input file must not be null.");
@@ -98,18 +90,24 @@ public class ModelBuilderHelper {
         geometryHelper = new GeometryHelper(appearanceHelper, this);
     }
 
-    ModelBuilderHelper initialize(FileMetadata metadata, ReadOptions options) {
+    private ModelBuilderHelper doInitialize(FileMetadata metadata, ReadOptions options, FormatOptions<?> formatOptions) {
         version = metadata.getVersion() != null ? metadata.getVersion() : CityGMLVersion.v3_0;
         encoding = metadata.getEncoding() != null ? metadata.getEncoding() : StandardCharsets.UTF_8.name();
         rootSrsName = metadata.getSrsName();
         failFast = options.isFailFast();
         computeEnvelopes = options.isComputeEnvelopes();
+        implicitGeometryScope = options.getImplicitGeometryScope();
+        appearanceHelper.initialize(formatOptions);
         return this;
     }
 
     ModelBuilderHelper initialize(FileMetadata metadata, ReadOptions options, CityGMLFormatOptions formatOptions) {
-        importXALSource = formatOptions.isImportXALSource();
-        return initialize(metadata, options);
+        includeXALSource = formatOptions.isIncludeXALSource();
+        return doInitialize(metadata, options, formatOptions);
+    }
+
+    ModelBuilderHelper initialize(FileMetadata metadata, ReadOptions options, CityJSONFormatOptions formatOptions) {
+        return doInitialize(metadata, options, formatOptions);
     }
 
     public InputFile getInputFile() {
@@ -132,13 +130,13 @@ public class ModelBuilderHelper {
         return computeEnvelopes;
     }
 
-    public boolean isImportXALSource() {
-        return importXALSource;
+    public boolean isIncludeXALSource() {
+        return includeXALSource;
     }
 
     public void logOrThrow(Level level, String message, Throwable cause) throws ModelBuildException {
         if (!failFast) {
-            logger.log(level, message, cause);
+            logger.atLevel(level).setCause(cause).log(message);
         } else {
             throw new ModelBuildException(message, cause);
         }
@@ -181,9 +179,34 @@ public class ModelBuilderHelper {
         return null;
     }
 
-    public boolean lookupAndPut(ExternalFile file) {
-        String id = file != null ? file.getObjectId().orElse(null) : null;
-        return id != null && getOrCreatePersistentMap("external-files").putIfAbsent(id, Boolean.TRUE) != null;
+    public boolean lookupAndPut(AbstractGML feature) {
+        return feature.getId() != null && !featureIdCache.add(feature.getId());
+    }
+
+    public boolean lookupAndPut(AbstractSurfaceData surfaceData) {
+        return surfaceData.getId() != null && !surfaceDataIdCache.add(surfaceData.getId());
+    }
+
+    public boolean lookupAndPut(AbstractGeometry geometry) {
+        String objectId = geometry.getId();
+        if (objectId != null) {
+            if (implicitGeometryScope == ImplicitGeometryScope.GLOBAL) {
+                return store.getOrCreateMap("implicit-geometries").putIfAbsent(objectId, true) != null;
+            } else {
+                return !geometryIdCache.add(objectId);
+            }
+        }
+
+        return false;
+    }
+
+    public boolean lookupAndPut(org.citygml4j.core.model.core.Address address) {
+        return address.getId() != null && !addressIdCache.add(address.getId());
+    }
+
+    public boolean lookupAndPut(ExternalFile externalFile) {
+        String objectId = externalFile.getObjectId().orElse(null);
+        return objectId != null && !externalFileIdCache.add(objectId);
     }
 
     @SuppressWarnings("unchecked")
@@ -482,11 +505,15 @@ public class ModelBuilderHelper {
     public AddressProperty getAddressProperty(Name name, org.citygml4j.core.model.core.AddressProperty source) throws ModelBuildException {
         if (source != null) {
             if (source.isSetInlineObject()) {
-                return AddressProperty.of(name, buildObject(source.getObject(),
-                        Address.newInstance(),
-                        getOrCreateBuilder(AddressAdapter.class)));
+                org.citygml4j.core.model.core.Address address = source.getObject();
+                if (lookupAndPut(address)) {
+                    return AddressProperty.of(name, address.getId());
+                } else {
+                    return AddressProperty.of(name, buildObject(address, Address.newInstance(),
+                            getOrCreateBuilder(AddressAdapter.class)));
+                }
             } else {
-                Reference reference = getFeatureReference(source);
+                String reference = getFeatureReference(source);
                 return reference != null ? AddressProperty.of(name, reference) : null;
             }
         }
@@ -505,9 +532,14 @@ public class ModelBuilderHelper {
     public FeatureProperty getFeatureProperty(Name name, AbstractInlineOrByReferenceProperty<? extends AbstractGML> source, RelationType relationType) throws ModelBuildException {
         if (source != null && !AbstractGeometry.class.isAssignableFrom(source.getTargetType())) {
             if (source.isSetInlineObject()) {
-                Feature feature = getFeature(source.getObject());
-                if (feature != null) {
-                    return FeatureProperty.of(name, feature, relationType);
+                AbstractGML object = source.getObject();
+                if (lookupAndPut(object)) {
+                    return FeatureProperty.of(name, object.getId(), relationType);
+                } else {
+                    Feature feature = getFeature(object);
+                    if (feature != null) {
+                        return FeatureProperty.of(name, feature, relationType);
+                    }
                 }
             } else {
                 return getFeatureProperty(name, (ResolvableAssociation<? extends AbstractGML>) source, relationType);
@@ -531,7 +563,7 @@ public class ModelBuilderHelper {
     }
 
     public FeatureProperty getFeatureProperty(Name name, ResolvableAssociation<? extends AbstractGML> source, RelationType relationType) {
-        Reference reference = getFeatureReference(source);
+        String reference = getFeatureReference(source);
         return reference != null ? FeatureProperty.of(name, reference, relationType) : null;
     }
 
@@ -613,15 +645,15 @@ public class ModelBuilderHelper {
         }
     }
 
-    public Reference getFeatureReference(ResolvableAssociation<?> association) {
+    public String getFeatureReference(ResolvableAssociation<?> association) {
         return association != null && !AbstractGeometry.class.isAssignableFrom(association.getTargetType()) ?
                 getReference(association) :
                 null;
     }
 
-    private Reference getReference(ResolvableAssociation<?> association) {
+    private String getReference(ResolvableAssociation<?> association) {
         return association != null && association.getHref() != null ?
-                Reference.of(getIdFromReference(association.getHref())) :
+                getIdFromReference(association.getHref()) :
                 null;
     }
 
@@ -646,7 +678,7 @@ public class ModelBuilderHelper {
             appearanceHelper.processTargets(source);
             return feature;
         } finally {
-            appearanceHelper.reset();
+            clear();
         }
     }
 
@@ -702,5 +734,14 @@ public class ModelBuilderHelper {
         } else {
             return null;
         }
+    }
+
+    private void clear() {
+        appearanceHelper.reset();
+        featureIdCache.clear();
+        surfaceDataIdCache.clear();
+        geometryIdCache.clear();
+        addressIdCache.clear();
+        externalFileIdCache.clear();
     }
 }

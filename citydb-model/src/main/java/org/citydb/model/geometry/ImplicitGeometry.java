@@ -1,28 +1,15 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.model.geometry;
 
 import org.citydb.model.common.*;
 import org.citydb.model.property.AppearanceProperty;
+import org.citydb.model.util.AffineTransformer;
+import org.citydb.model.util.IdCreator;
+import org.citydb.model.util.matrix.Matrix;
 
 import java.util.List;
 import java.util.Objects;
@@ -91,6 +78,21 @@ public class ImplicitGeometry extends Child implements Referencable, Visitable {
         return this;
     }
 
+    @Override
+    public String getOrCreateObjectId(IdCreator idCreator) {
+        return getObjectId().orElseGet(() -> {
+            if (geometry != null) {
+                setObjectId(geometry.getOrCreateObjectId(idCreator));
+            } else if (libraryObject != null) {
+                setObjectId(libraryObject.getOrCreateObjectId(idCreator));
+            } else {
+                setObjectId(Referencable.super.getOrCreateObjectId(idCreator));
+            }
+
+            return objectId;
+        });
+    }
+
     public boolean hasAppearances() {
         return appearances != null && !appearances.isEmpty();
     }
@@ -116,39 +118,28 @@ public class ImplicitGeometry extends Child implements Referencable, Visitable {
         return this;
     }
 
-    public Envelope getEnvelope(List<Double> transformationMatrix, Point referencePoint) {
-        if (geometry != null
-                && transformationMatrix != null
-                && transformationMatrix.size() > 15
-                && referencePoint != null) {
-            double[][] matrix = new double[4][4];
-            for (int i = 0; i < 4; i++) {
-                for (int j = 0; j < 4; j++) {
-                    matrix[i][j] = transformationMatrix.get(i * 4 + j);
-                }
+    public Envelope getEnvelope(Matrix4x4 transformationMatrix, Point referencePoint) {
+        if (transformationMatrix != null && referencePoint != null) {
+            Envelope envelope;
+            if (geometry != null) {
+                envelope = geometry.getEnvelope();
+                AffineTransformer.of(transformationMatrix.plus(new Matrix(4, 4)
+                                .set(0, 3, referencePoint.getCoordinate().getX())
+                                .set(1, 3, referencePoint.getCoordinate().getY())
+                                .set(2, 3, referencePoint.getCoordinate().getZ())))
+                        .transform(envelope);
+            } else {
+                envelope = Envelope.empty().include(Point.of(Coordinate.of(
+                        referencePoint.getCoordinate().getX() + transformationMatrix.get(0, 3),
+                        referencePoint.getCoordinate().getY() + transformationMatrix.get(1, 3),
+                        referencePoint.getCoordinate().getZ() + transformationMatrix.get(2, 3))));
             }
 
-            matrix[0][3] += referencePoint.getCoordinate().getX();
-            matrix[1][3] += referencePoint.getCoordinate().getY();
-            matrix[2][3] += referencePoint.getCoordinate().getZ();
-
-            Envelope template = geometry.getEnvelope();
-            return Envelope.of(
-                            multiply(matrix, template.getLowerCorner()),
-                            multiply(matrix, template.getUpperCorner()))
-                    .setSRID(referencePoint.getSRID().orElse(null))
-                    .setSrsName(referencePoint.getSrsName().orElse(null));
+            return envelope.setSRID(referencePoint.getSRID().orElse(null))
+                    .setSrsIdentifier(referencePoint.getSrsIdentifier().orElse(null));
         } else {
             return null;
         }
-    }
-
-    private Coordinate multiply(double[][] matrix, Coordinate coordinate) {
-        double[] v = new double[]{coordinate.getX(), coordinate.getY(), coordinate.getZ(), 1};
-        return Coordinate.of(
-                matrix[0][0] * v[0] + matrix[0][1] * v[1] + matrix[0][2] * v[2] + matrix[0][3] * v[3],
-                matrix[1][0] * v[0] + matrix[1][1] * v[1] + matrix[1][2] * v[2] + matrix[1][3] * v[3],
-                matrix[2][0] * v[0] + matrix[2][1] * v[1] + matrix[2][2] * v[2] + matrix[2][3] * v[3]);
     }
 
     @Override

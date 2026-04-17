@@ -1,0 +1,144 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
+ */
+
+package org.citydb.query.executor;
+
+import org.citydb.core.cache.PersistentMapStore;
+import org.citydb.database.adapter.DatabaseAdapter;
+import org.citydb.database.geometry.GeometryException;
+import org.citydb.database.srs.SpatialReference;
+import org.citydb.database.util.SqlHelper;
+import org.citydb.model.geometry.Envelope;
+import org.citydb.query.Query;
+import org.citydb.query.builder.QueryBuildException;
+import org.citydb.query.builder.sql.SqlBuildOptions;
+import org.citydb.query.builder.sql.SqlQueryBuilder;
+import org.citydb.sqlbuilder.query.Select;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Objects;
+
+public class QueryExecutor {
+    private final Select select;
+    private final Select count;
+    private final Select extent;
+    private final PersistentMapStore store;
+    private final DatabaseAdapter adapter;
+    private final SqlHelper helper;
+
+    private QueryExecutor(Select select, Select count, Select extent, PersistentMapStore store, DatabaseAdapter adapter) {
+        this.select = select;
+        this.count = count;
+        this.extent = extent;
+        this.store = store;
+        this.adapter = adapter;
+        helper = adapter.getSchemaAdapter().getSqlHelper();
+    }
+
+    public static Builder builder(DatabaseAdapter adapter) {
+        return new Builder(adapter);
+    }
+
+    public Select getSelect() {
+        return select;
+    }
+
+    public long countHits() throws SQLException {
+        return helper.count(count);
+    }
+
+    public long countHits(Connection connection) throws SQLException {
+        return helper.count(count, connection);
+    }
+
+    public Envelope computeExtent() throws GeometryException, SQLException {
+        try (Connection connection = adapter.getPool().getConnection()) {
+            return computeExtent(connection);
+        }
+    }
+
+    public Envelope computeExtent(Connection connection) throws GeometryException, SQLException {
+        try (PreparedStatement stmt = helper.prepareStatement(extent, connection);
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                Envelope envelope = adapter.getGeometryAdapter().getEnvelope(rs.getObject("extent"));
+                if (envelope != null) {
+                    SpatialReference reference = adapter.getDatabaseMetadata().getSpatialReference();
+                    return envelope.setSRID(reference.getSRID())
+                            .setSrsIdentifier(reference.getIdentifier());
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public QueryResult executeQuery() throws SQLException {
+        return executeQuery(adapter.getPool().getConnection());
+    }
+
+    public QueryResult executeQuery(Connection connection) throws SQLException {
+        return new QueryResult(connection, helper.prepareStatement(select, connection), store);
+    }
+
+    public static class Builder {
+        private final Logger logger = LoggerFactory.getLogger(Builder.class);
+        private final DatabaseAdapter adapter;
+        private final SqlQueryBuilder builder;
+        private Path tempDirectory;
+
+        private Builder(DatabaseAdapter adapter) {
+            this.adapter = Objects.requireNonNull(adapter, "The database adapter must not be null.");
+            builder = SqlQueryBuilder.of(adapter);
+        }
+
+        public Builder tempDirectory(Path tempDirectory) {
+            this.tempDirectory = tempDirectory;
+            return this;
+        }
+
+        public QueryExecutor build(Query query) throws QueryBuildException, IOException {
+            return build(query, SqlBuildOptions.defaults());
+        }
+
+        public QueryExecutor build(Query query, SqlBuildOptions options) throws QueryBuildException, IOException {
+            Select select = builder.build(query, options);
+            Select count = options.isOmitDistinct() ?
+                    builder.build(query, SqlBuildOptions.of(options).omitDistinct(false)) :
+                    select;
+
+            PersistentMapStore store = null;
+            if (options.isOmitDistinct() && !select.toSql().equals(count.toSql())) {
+                store = PersistentMapStore.builder()
+                        .tempDirectory(tempDirectory)
+                        .build();
+                logger.debug("Initialized distinct id cache at {}.", store.getBackingFile());
+            }
+
+            return new QueryExecutor(select, count, buildExtentQuery(query, options), store, adapter);
+        }
+
+        private Select buildExtentQuery(Query query, SqlBuildOptions options) throws QueryBuildException {
+            Select extent = builder.build(query, SqlBuildOptions.of(options)
+                            .omitDistinct(true)
+                            .withColumn("envelope"))
+                    .removeSelect()
+                    .removeOrderBy()
+                    .removeGroupBy();
+
+            return extent.select(adapter.getGeometryAdapter()
+                    .getSpatialOperationHelper()
+                    .extent(extent.getFrom().get(0).column("envelope"))
+                    .as("extent"));
+        }
+    }
+}

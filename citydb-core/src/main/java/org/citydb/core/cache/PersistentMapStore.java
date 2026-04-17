@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.core.cache;
@@ -26,8 +10,8 @@ import org.h2.mvstore.MVStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.SecureRandom;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class PersistentMapStore implements AutoCloseable {
     private MVStore store;
@@ -72,6 +56,27 @@ public class PersistentMapStore implements AutoCloseable {
         }
     }
 
+    public void withCurrentVersion(Runnable action) {
+        if (action != null) {
+            try {
+                withCurrentVersionOrThrow((Action<Exception>) action::run);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to execute map action.", e);
+            }
+        }
+    }
+
+    public <E extends Exception> void withCurrentVersionOrThrow(Action<E> action) throws E {
+        if (action != null && store != null) {
+            MVStore.TxCounter version = store.registerVersionUsage();
+            try {
+                action.run();
+            } finally {
+                store.deregisterVersionUsage(version);
+            }
+        }
+    }
+
     public boolean isClosed() {
         return store == null || store.isClosed();
     }
@@ -96,12 +101,19 @@ public class PersistentMapStore implements AutoCloseable {
         }
     }
 
+    @FunctionalInterface
+    public interface Action<E extends Exception> {
+        void run() throws E;
+    }
+
     public static class Builder {
-        private static final SecureRandom random = new SecureRandom();
         private Path tempDirectory;
         private CompressionLevel compressionLevel;
         private int cacheSize;
         private int cacheConcurrency;
+
+        private Builder() {
+        }
 
         public Builder tempDirectory(Path tempDirectory) {
             this.tempDirectory = tempDirectory;
@@ -173,10 +185,10 @@ public class PersistentMapStore implements AutoCloseable {
                 throw new IOException("The persistent map store location " + tempDirectory + " is not a directory.");
             }
 
-            long n = random.nextLong() ^ System.currentTimeMillis();
+            long n = ThreadLocalRandom.current().nextLong() ^ System.currentTimeMillis();
             Path backingFile = tempDirectory.resolve("cache-" + Long.toUnsignedString(n) + ".tmp")
-                    .normalize()
-                    .toAbsolutePath();
+                    .toAbsolutePath()
+                    .normalize();
 
             Files.deleteIfExists(backingFile);
             return backingFile;

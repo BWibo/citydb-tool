@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.writer;
@@ -25,8 +9,12 @@ import com.alibaba.fastjson2.JSONWriter;
 import com.alibaba.fastjson2.annotation.JSONField;
 import org.citydb.config.SerializableConfig;
 import org.citydb.io.citygml.writer.options.AddressMode;
-import org.citydb.io.writer.option.OutputFormatOptions;
+import org.citydb.io.writer.options.OutputFormatOptions;
 import org.citygml4j.core.model.CityGMLVersion;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 @SerializableConfig(name = "CityGML")
 public class CityGMLFormatOptions implements OutputFormatOptions {
@@ -38,6 +26,7 @@ public class CityGMLFormatOptions implements OutputFormatOptions {
     private boolean mapLod1MultiSurfaces;
     @JSONField(serializeFeatures = JSONWriter.Feature.WriteEnumUsingToString)
     private AddressMode addressMode = AddressMode.COLUMNS_FIRST;
+    private List<String> xslTransforms;
 
     public CityGMLVersion getVersion() {
         return version != null ? version : CityGMLVersion.v3_0;
@@ -45,11 +34,6 @@ public class CityGMLFormatOptions implements OutputFormatOptions {
 
     public CityGMLFormatOptions setVersion(CityGMLVersion version) {
         this.version = version;
-        return this;
-    }
-
-    public CityGMLFormatOptions setVersion(String version) {
-        this.version = CityGMLVersion.fromValue(version);
         return this;
     }
 
@@ -98,8 +82,32 @@ public class CityGMLFormatOptions implements OutputFormatOptions {
         return this;
     }
 
-    public CityGMLFormatOptions setAddressMode(String addressMode) {
-        this.addressMode = AddressMode.fromValue(addressMode);
+    public boolean hasXslTransforms() {
+        return xslTransforms != null && !xslTransforms.isEmpty();
+    }
+
+    public List<String> getXslTransforms() {
+        if (xslTransforms == null) {
+            xslTransforms = new ArrayList<>();
+        }
+
+        return xslTransforms;
+    }
+
+    public CityGMLFormatOptions setXslTransforms(List<String> xslTransforms) {
+        this.xslTransforms = xslTransforms;
+        return this;
+    }
+
+    public CityGMLFormatOptions addXslTransform(Path xslTransform) {
+        return addXslTransform(xslTransform != null ? xslTransform.toString() : null);
+    }
+
+    public CityGMLFormatOptions addXslTransform(String xslTransform) {
+        if (xslTransform != null) {
+            getXslTransforms().add(xslTransform);
+        }
+
         return this;
     }
 }

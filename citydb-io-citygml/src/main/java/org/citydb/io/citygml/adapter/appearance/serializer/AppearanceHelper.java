@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.adapter.appearance.serializer;
@@ -28,7 +12,7 @@ import org.citydb.model.appearance.SurfaceData;
 import org.citydb.model.appearance.SurfaceDataProperty;
 import org.citydb.model.appearance.TextureCoordinate;
 import org.citydb.model.common.Child;
-import org.citydb.model.common.Reference;
+import org.citydb.model.common.Matrix3x4;
 import org.citydb.model.geometry.Geometry;
 import org.citydb.model.geometry.LinearRing;
 import org.citydb.model.geometry.Surface;
@@ -76,9 +60,7 @@ public class AppearanceHelper {
                 }
             }
         } else {
-            source.getReference()
-                    .map(Reference::getTarget)
-                    .ifPresent(reference -> property.setHref("#" + reference));
+            source.getReference().ifPresent(reference -> property.setHref("#" + reference));
         }
 
         return property;
@@ -146,13 +128,13 @@ public class AppearanceHelper {
                         "#" + k, new AbstractTextureParameterizationProperty(v)))));
     }
 
-    public void addWorldToTextureTargets(Map<Surface<?>, List<Double>> mapping, ParameterizedTexture target, Set<String> geometries) {
+    public void addWorldToTextureTargets(Map<Surface<?>, Matrix3x4> mapping, ParameterizedTexture target, Set<String> geometries) {
         Set<String> targets = new HashSet<>();
         mapping.forEach((k, v) -> {
             String surfaceId = k.getOrCreateObjectId();
             if (geometries.contains(surfaceId) && targets.add(surfaceId)) {
                 TexCoordGen texCoordGen = new TexCoordGen();
-                texCoordGen.setWorldToTexture(TransformationMatrix3x4.ofRowMajorList(v));
+                texCoordGen.setWorldToTexture(TransformationMatrix3x4.ofRowMajor(v.toRowMajor()));
                 target.getTextureParameterizations().add(new TextureAssociationProperty(new TextureAssociation(
                         "#" + surfaceId, new AbstractTextureParameterizationProperty(texCoordGen))));
             }
@@ -172,8 +154,8 @@ public class AppearanceHelper {
         if (textureCoordinates != null) {
             List<Double> values = new ArrayList<>();
             textureCoordinates.forEach(textureCoordinate -> {
-                values.add(textureCoordinate.getS());
-                values.add(textureCoordinate.getT());
+                values.add((double) textureCoordinate.getS());
+                values.add((double) textureCoordinate.getT());
             });
 
             return values;

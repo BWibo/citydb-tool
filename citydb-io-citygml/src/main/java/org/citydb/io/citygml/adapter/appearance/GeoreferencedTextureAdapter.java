@@ -1,27 +1,10 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.adapter.appearance;
 
-import org.apache.logging.log4j.Level;
 import org.citydb.core.file.FileLocator;
 import org.citydb.io.citygml.annotation.DatabaseType;
 import org.citydb.io.citygml.builder.ModelBuildException;
@@ -29,11 +12,11 @@ import org.citydb.io.citygml.reader.ModelBuilderHelper;
 import org.citydb.io.citygml.serializer.ModelSerializeException;
 import org.citydb.io.citygml.writer.ModelSerializerHelper;
 import org.citydb.model.appearance.GeoreferencedTexture;
-import org.citydb.model.appearance.TextureImageProperty;
 import org.citydb.model.common.ExternalFile;
 import org.citydb.model.common.Namespaces;
 import org.citydb.model.geometry.Point;
 import org.citygml4j.core.model.core.TransformationMatrix2x2;
+import org.slf4j.event.Level;
 import org.xmlobjects.gml.model.geometry.DirectPosition;
 import org.xmlobjects.gml.model.geometry.primitives.PointProperty;
 
@@ -58,8 +41,7 @@ public class GeoreferencedTextureAdapter extends TextureAdapter<GeoreferencedTex
         if (source.getOrientation() == null
                 && source.getReferencePoint() == null
                 && source.getImageURI() != null) {
-            ExternalFile textureImage = target.getTextureImageProperty()
-                    .flatMap(TextureImageProperty::getObject)
+            ExternalFile textureImage = target.getTextureImage()
                     .orElseGet(() -> ExternalFile.of(source.getImageURI()));
             processWorldFile(source, textureImage, helper);
         }
@@ -69,7 +51,7 @@ public class GeoreferencedTextureAdapter extends TextureAdapter<GeoreferencedTex
         }
 
         if (source.getOrientation() != null) {
-            target.setOrientation(source.getOrientation().toRowMajorList());
+            target.setOrientation(source.getOrientation().toRowMajor());
         }
     }
 
@@ -86,7 +68,7 @@ public class GeoreferencedTextureAdapter extends TextureAdapter<GeoreferencedTex
                 target.setReferencePoint(new PointProperty(helper.getPoint(referencePoint, false))));
 
         source.getOrientation().ifPresent(transformationMatrix ->
-                target.setOrientation(TransformationMatrix2x2.ofRowMajorList(transformationMatrix)));
+                target.setOrientation(TransformationMatrix2x2.ofRowMajor(transformationMatrix.toRowMajor())));
     }
 
     private void processWorldFile(org.citygml4j.core.model.appearance.GeoreferencedTexture source, ExternalFile textureImage, ModelBuilderHelper helper) throws ModelBuildException {
@@ -121,7 +103,7 @@ public class GeoreferencedTextureAdapter extends TextureAdapter<GeoreferencedTex
                     }
 
                     if (content.size() == 6) {
-                        source.setOrientation(TransformationMatrix2x2.ofRowMajorList(content.subList(0, 4)));
+                        source.setOrientation(TransformationMatrix2x2.ofRowMajor(content.subList(0, 4)));
                         source.setReferencePoint(new PointProperty(
                                 new org.xmlobjects.gml.model.geometry.primitives.Point(
                                         new DirectPosition(content.subList(4, 6)))));

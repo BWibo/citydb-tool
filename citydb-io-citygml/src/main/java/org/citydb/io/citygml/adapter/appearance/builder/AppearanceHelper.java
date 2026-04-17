@@ -1,41 +1,29 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.adapter.appearance.builder;
 
 import org.citydb.io.citygml.builder.ModelBuildException;
 import org.citydb.io.citygml.reader.ModelBuilderHelper;
+import org.citydb.io.citygml.reader.options.AppearanceOptions;
+import org.citydb.io.citygml.reader.options.FormatOptions;
+import org.citydb.model.appearance.*;
 import org.citydb.model.appearance.GeoreferencedTexture;
 import org.citydb.model.appearance.ParameterizedTexture;
 import org.citydb.model.appearance.X3DMaterial;
-import org.citydb.model.appearance.*;
 import org.citydb.model.common.Child;
 import org.citydb.model.geometry.LinearRing;
 import org.citydb.model.geometry.Polygon;
 import org.citydb.model.geometry.Surface;
-import org.citygml4j.core.model.appearance.Appearance;
 import org.citygml4j.core.model.appearance.*;
+import org.citygml4j.core.model.appearance.Appearance;
 import org.citygml4j.core.model.core.AbstractAppearance;
 import org.citygml4j.core.model.core.AbstractFeature;
+import org.citygml4j.core.model.core.ImplicitGeometry;
 import org.citygml4j.core.visitor.ObjectWalker;
+import org.citygml4j.core.visitor.VisitableObject;
 import org.xmlobjects.gml.model.GMLObject;
 import org.xmlobjects.gml.model.feature.FeatureProperty;
 import org.xmlobjects.gml.model.geometry.AbstractGeometry;
@@ -53,14 +41,28 @@ public class AppearanceHelper {
     private final Map<AbstractSurfaceData, SurfaceData<?>> surfaceData = new IdentityHashMap<>();
     private final Map<GMLObject, List<TargetContext<Surface<?>>>> surfaces = new IdentityHashMap<>();
     private final Map<GMLObject, List<TargetContext<LinearRing>>> rings = new IdentityHashMap<>();
+    private boolean processAppearances = true;
+    private Set<String> themes;
+
+    private record TargetContext<T extends Child>(T target, GeometryProperty<?> parent) {
+    }
 
     public AppearanceHelper(ModelBuilderHelper helper) {
         this.helper = helper;
         builder = new AppearanceBuilder(this);
     }
 
+    public AppearanceHelper initialize(FormatOptions<?> formatOptions) {
+        AppearanceOptions options = formatOptions.getAppearanceOptions().orElseGet(AppearanceOptions::new);
+        processAppearances = options.isReadAppearances();
+        themes = options.hasThemes() ? options.getThemes() : null;
+        return this;
+    }
+
     public org.citydb.model.appearance.Appearance getAppearance(AbstractAppearance source) throws ModelBuildException {
-        if (source instanceof Appearance appearance) {
+        if (processAppearances
+                && source instanceof Appearance appearance
+                && (themes == null || themes.contains(appearance.getTheme()))) {
             org.citydb.model.appearance.Appearance target = org.citydb.model.appearance.Appearance.newInstance();
             builder.build(appearance, target, helper);
             return target;
@@ -70,26 +72,32 @@ public class AppearanceHelper {
     }
 
     public void addSurfaceData(SurfaceData<?> surfaceData, AbstractSurfaceData source) {
-        if (surfaceData != null && source != null) {
+        if (processAppearances && surfaceData != null && source != null) {
             this.surfaceData.put(source, surfaceData);
         }
     }
 
     public void addTarget(Surface<?> surface, GMLObject source, GeometryProperty<?> parent) {
-        if (surface != null && source != null) {
+        if (processAppearances && surface != null && source != null) {
             surfaces.computeIfAbsent(source, v -> new ArrayList<>()).add(new TargetContext<>(surface, parent));
         }
     }
 
     public void addTarget(LinearRing ring, AbstractGeometry source, GeometryProperty<?> parent) {
-        if (ring != null && source != null) {
+        if (processAppearances && ring != null && source != null) {
             rings.computeIfAbsent(source, v -> new ArrayList<>()).add(new TargetContext<>(ring, parent));
         }
     }
 
     public void processTargets(AbstractFeature feature) {
-        AppearanceCollector collector = new AppearanceCollector();
-        collector.collect(feature).forEach(processor::process);
+        if (processAppearances && !surfaceData.isEmpty()) {
+            AppearanceCollector collector = new AppearanceCollector();
+            for (AppearanceCollector.Context context : collector.collect(feature)) {
+                for (Appearance appearance : context.appearances) {
+                    processor.process(appearance, context.properties);
+                }
+            }
+        }
     }
 
     public void reset() {
@@ -99,28 +107,55 @@ public class AppearanceHelper {
     }
 
     private static class AppearanceCollector extends ObjectWalker {
-        private final Map<Appearance, Set<GeometryProperty<?>>> appearances = new IdentityHashMap<>();
+        private final Map<VisitableObject, Context> contexts = new IdentityHashMap<>();
 
-        Map<Appearance, Set<GeometryProperty<?>>> collect(AbstractFeature feature) {
+        Collection<Context> collect(AbstractFeature feature) {
             feature.accept(this);
-            return appearances;
+            return contexts.values();
         }
 
         @Override
         public void visit(FeatureProperty<?> property) {
-            if (property.getObject() instanceof Appearance) {
-                Set<GeometryProperty<?>> contexts = Collections.newSetFromMap(new IdentityHashMap<>());
-                property.getParent(AbstractFeature.class).accept(new ObjectWalker() {
-                    @Override
-                    public void visit(GeometryProperty<?> property) {
-                        contexts.add(property);
-                        super.visit(property);
-                    }
-                });
-
-                appearances.put((Appearance) property.getObject(), contexts);
+            if (property.getObject() instanceof Appearance appearance) {
+                VisitableObject parent = getParent(property);
+                contexts.computeIfAbsent(parent, this::getContext)
+                        .appearances.add(appearance);
             } else {
                 super.visit(property);
+            }
+        }
+
+        private Context getContext(VisitableObject parent) {
+            Set<GeometryProperty<?>> properties = Collections.newSetFromMap(new IdentityHashMap<>());
+            parent.accept(new ObjectWalker() {
+                @Override
+                public void visit(GeometryProperty<?> property) {
+                    properties.add(property);
+                    super.visit(property);
+                }
+            });
+
+            return new Context(properties);
+        }
+
+        private VisitableObject getParent(FeatureProperty<?> property) {
+            org.xmlobjects.model.Child parent = property.getParent();
+            if (parent instanceof AbstractFeature feature) {
+                return feature;
+            } else if (parent instanceof ImplicitGeometry implicitGeometry) {
+                return implicitGeometry;
+            } else {
+                return parent.getParent(AbstractFeature.class);
+            }
+        }
+
+        private static class Context {
+            final Set<GeometryProperty<?>> properties;
+            final Set<Appearance> appearances;
+
+            Context(Set<GeometryProperty<?>> properties) {
+                this.properties = properties;
+                appearances = Collections.newSetFromMap(new IdentityHashMap<>());
             }
         }
     }
@@ -181,7 +216,7 @@ public class AppearanceHelper {
 
                     rings.getOrDefault(source, Collections.emptyList()).stream()
                             .filter(this::isValidContext)
-                            .map(TargetContext::getTarget)
+                            .map(TargetContext::target)
                             .forEach(ring -> target.addTextureCoordinates(ring,
                                     createTextureCoordinates(textureCoordinates, ring)));
                 }
@@ -191,7 +226,7 @@ public class AppearanceHelper {
         private void addMapping(GeometryReference reference, TexCoordGen texCoordGen, ParameterizedTexture target) {
             if (texCoordGen.getWorldToTexture() != null) {
                 getTargets(reference).forEach(surface ->
-                        target.addWorldToTextureMapping(surface, texCoordGen.getWorldToTexture().toRowMajorList()));
+                        target.addWorldToTextureMapping(surface, texCoordGen.getWorldToTexture().toRowMajor()));
             }
         }
 
@@ -231,7 +266,7 @@ public class AppearanceHelper {
                 if (contexts != null) {
                     return contexts.stream()
                             .filter(this::isValidContext)
-                            .map(TargetContext::getTarget)
+                            .map(TargetContext::target)
                             .collect(Collectors.toList());
                 } else {
                     List<Surface<?>> targets = new ArrayList<>();
@@ -249,7 +284,7 @@ public class AppearanceHelper {
                         private void process(GMLObject geometry) {
                             surfaces.getOrDefault(geometry, Collections.emptyList()).stream()
                                     .filter(context -> isValidContext(context))
-                                    .map(TargetContext::getTarget)
+                                    .map(TargetContext::target)
                                     .forEach(targets::add);
                         }
                     });
@@ -262,25 +297,7 @@ public class AppearanceHelper {
         }
 
         private boolean isValidContext(TargetContext<?> context) {
-            return context.getParent() == null || contexts.contains(context.getParent());
-        }
-    }
-
-    private static class TargetContext<T extends Child> {
-        private final T target;
-        private final GeometryProperty<?> parent;
-
-        TargetContext(T target, GeometryProperty<?> parent) {
-            this.target = target;
-            this.parent = parent;
-        }
-
-        T getTarget() {
-            return target;
-        }
-
-        GeometryProperty<?> getParent() {
-            return parent;
+            return context.parent() == null || contexts.contains(context.parent());
         }
     }
 }

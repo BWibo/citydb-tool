@@ -1,0 +1,193 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
+ */
+
+package org.citydb.database.util;
+
+import org.citydb.config.common.SrsReference;
+import org.citydb.core.exception.UncheckedException;
+import org.citydb.database.adapter.DatabaseAdapter;
+import org.citydb.database.srs.SpatialReference;
+import org.citydb.database.srs.SpatialReferenceType;
+import org.citydb.database.srs.SrsException;
+import org.citydb.database.srs.SrsUnit;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.measure.Units;
+
+import javax.measure.Unit;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public abstract class SrsHelper {
+    private static final Pattern HTTP_PATTERN = Pattern.compile(
+            "https?://www.opengis.net/def/crs/([^/]+?)/[^/]+?/([^/]+?)(?:/.*)?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern URN_PATTERN = Pattern.compile(
+            "urn:ogc:def:crs(?:,crs)?:([^:]+?):[^:]*?:([^,]+?)(?:,.*)?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern EPSG_PATTERN = Pattern.compile("EPSG:([0-9]+)", Pattern.CASE_INSENSITIVE);
+
+    protected final DatabaseAdapter adapter;
+    private final Map<String, Integer> identifiers = new ConcurrentHashMap<>();
+
+    protected SrsHelper(DatabaseAdapter adapter) {
+        this.adapter = adapter;
+    }
+
+    public abstract Optional<SpatialReference> getDatabaseSrs(String schemaName, Connection connection) throws SQLException;
+
+    protected abstract SpatialReference getSpatialReference(int srid, String identifier, Connection connection) throws SQLException;
+
+    protected abstract SpatialReferenceType getSpatialReferenceType(String type);
+
+    public SpatialReference getSpatialReference(int srid) throws SrsException, SQLException {
+        return getSpatialReference(srid, getDefaultIdentifier(srid));
+    }
+
+    public SpatialReference getSpatialReference(String identifier) throws SrsException, SQLException {
+        return getSpatialReference(parseSRID(identifier), identifier);
+    }
+
+    public SpatialReference getSpatialReference(int srid, String identifier) throws SrsException, SQLException {
+        SpatialReference databaseSrs = adapter.getDatabaseMetadata().getSpatialReference();
+        if (srid == databaseSrs.getSRID()) {
+            return databaseSrs.getIdentifier().equals(identifier) ?
+                    databaseSrs :
+                    SpatialReference.of(srid,
+                            databaseSrs.getType(),
+                            databaseSrs.getName(),
+                            identifier,
+                            databaseSrs.getWKT());
+        } else {
+            try (Connection connection = adapter.getPool().getConnection()) {
+                SpatialReference srs = getSpatialReference(srid, identifier, connection);
+                if (srs == null) {
+                    throw new SrsException("The SRID " + srid + " is not supported by the database.");
+                }
+
+                return srs;
+            }
+        }
+    }
+
+    public Optional<SpatialReference> getSpatialReference(SrsReference reference) throws SrsException, SQLException {
+        if (reference != null) {
+            if (reference.getSRID().isPresent()) {
+                return Optional.of(getSpatialReference(reference.getSRID().get(),
+                        reference.getIdentifier().orElse(null)));
+            } else if (reference.getIdentifier().isPresent()) {
+                return Optional.of(getSpatialReference(reference.getIdentifier().get()));
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public Optional<SpatialReference> getSpatialReference(org.citydb.model.geometry.SrsReference reference) throws SrsException, SQLException {
+        if (reference != null) {
+            if (reference.getSRID().isPresent()) {
+                return Optional.of(getSpatialReference(reference.getSRID().get(),
+                        reference.getSrsIdentifier().orElse(null)));
+            } else if (reference.getSrsIdentifier().isPresent()) {
+                return Optional.of(getSpatialReference(reference.getSrsIdentifier().get()));
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public String getDefaultIdentifier(int srid) {
+        return "http://www.opengis.net/def/crs/EPSG/0/" + srid;
+    }
+
+    public int parseSRID(String identifier) throws SrsException {
+        if (identifier == null || identifier.isEmpty()) {
+            throw new SrsException("Unknown SRS identifier schema '" + identifier + "'.");
+        }
+
+        try {
+            return identifiers.computeIfAbsent(identifier, k -> {
+                try {
+                    String candidate = k.toLowerCase(Locale.ROOT);
+                    if (candidate.startsWith("http")) {
+                        return parseHttpSchema(k);
+                    } else if (candidate.startsWith("urn")) {
+                        return parseUrnSchema(k);
+                    } else if (candidate.startsWith("epsg")) {
+                        return parseEpsgSchema(k);
+                    }
+
+                    throw new SrsException("Unknown SRS identifier schema '" + k + "'.");
+                } catch (SrsException e) {
+                    throw UncheckedException.wrap(e);
+                }
+            });
+        } catch (RuntimeException e) {
+            throw UncheckedException.unwrap(e, SrsException.class);
+        }
+    }
+
+    private int parseHttpSchema(String identifier) throws SrsException {
+        Matcher matcher = HTTP_PATTERN.matcher(identifier);
+        if (matcher.matches()) {
+            String code = matcher.group(2);
+            if (code.equalsIgnoreCase("CRS84")) {
+                return 4326;
+            } else if (code.equalsIgnoreCase("CRS84h")) {
+                return 4979;
+            } else {
+                return parseCode(code, identifier);
+            }
+        }
+
+        return 0;
+    }
+
+    private int parseUrnSchema(String identifier) throws SrsException {
+        Matcher matcher = URN_PATTERN.matcher(identifier);
+        return matcher.matches() ?
+                parseCode(matcher.group(2), identifier) :
+                0;
+    }
+
+    private int parseEpsgSchema(String identifier) throws SrsException {
+        Matcher matcher = EPSG_PATTERN.matcher(identifier);
+        return matcher.matches() ?
+                parseCode(matcher.group(1), identifier) :
+                0;
+    }
+
+    private int parseCode(String code, String identifier) throws SrsException {
+        try {
+            return Integer.parseInt(code);
+        } catch (NumberFormatException e) {
+            throw new SrsException("Failed to parse '" + code + "' as SRS code from '" + identifier + "'", e);
+        }
+    }
+
+    public double convert(double value, SrsUnit fromUnit) throws SrsException {
+        if (fromUnit != null) {
+            CoordinateReferenceSystem crs = adapter.getDatabaseMetadata()
+                    .getSpatialReference()
+                    .getDefinition().orElse(null);
+            if (crs != null && crs.getCoordinateSystem().getDimension() > 0) {
+                try {
+                    Unit<?> toUnit = crs.getCoordinateSystem().getAxis(0).getUnit();
+                    return Units.getConverterToAny(fromUnit.getUnit(), toUnit).convert(value);
+                } catch (Exception e) {
+                    throw new SrsException("Failed to convert from the unit '" + fromUnit.getSymbol() + "' " +
+                            "to the unit of the database SRS.", e);
+                }
+            } else {
+                throw new SrsException("Failed to retrieve the unit of the database SRS.");
+            }
+        } else {
+            return value;
+        }
+    }
+}

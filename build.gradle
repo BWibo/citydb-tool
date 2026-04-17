@@ -6,10 +6,10 @@ plugins {
 
 apply from: 'properties.gradle'
 
-version '0.7.1-beta'
+version = '1.3.0'
 
 allprojects {
-    group 'org.citydb'
+    group = 'org.citydb'
 }
 
 subprojects {
@@ -18,7 +18,7 @@ subprojects {
     apply plugin: 'org.gradlex.extra-java-module-info'
     apply plugin: 'idea'
 
-    version parent.version
+    version = parent.version
 
     java {
         toolchain {
@@ -34,20 +34,20 @@ subprojects {
 
     repositories {
         maven {
-            url 'https://repo.osgeo.org/repository/release'
+            url = 'https://repo.osgeo.org/repository/release/'
         }
         maven {
-            url 'https://oss.sonatype.org/content/repositories/snapshots/'
+            url = 'https://central.sonatype.com/repository/maven-snapshots/'
         }
         maven {
-            url 'https://3dcitydb.org/maven'
+            url = 'https://3dcitydb.org/maven'
         }
         mavenCentral()
     }
 
     dependencies {
-        testImplementation(platform('org.junit:junit-bom:5.9.2'))
-        testImplementation('org.junit.jupiter:junit-jupiter')
+        testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     }
 
     test {
@@ -55,43 +55,46 @@ subprojects {
     }
 
     extraJavaModuleInfo {
-        module('tomcat-jdbc-10.1.18.jar', 'org.apache.tomcat.jdbc', '10.1.18') {
+        failOnMissingModuleInfo = false
+        deriveAutomaticModuleNamesFromFileNames = true
+        module('org.apache.tomcat:tomcat-jdbc', 'org.apache.tomcat.jdbc') {
             requires('java.sql')
             requires('java.management')
             requires('org.apache.tomcat.juli')
-            exports('org.apache.tomcat.jdbc.pool')
+            exportAllPackages()
         }
     }
 
     idea {
         module {
-            outputDir file('out/production/classes')
+            outputDir = file('out/production/classes')
         }
     }
 
-    task processLicense(type: Copy) {
+    tasks.register('processLicense', Copy) {
         from("$rootDir/resources/license/LICENSE.txt") {
             filteringCharset = 'UTF-8'
             filter(ReplaceTokens, tokens: [
-                    name: project.appName
+                    name: appName
             ])
         }
         into "$projectDir/build/tmp/license"
     }
 
     javadoc {
+        def module = project.name
+
         options {
-            overview "$projectDir/build/tmp/javadoc/overview.html"
-            header "${project.name} ${project.version}"
+            title = "$project.name $project.version"
+            header = title
+            overview = "$projectDir/build/tmp/javadoc/overview.html"
             bottom """
                 <a href="${appIssueTrackerUrl}">Report a bug or suggest an enhancement</a><br>
-                ${project.name} is open source and licensed under the <a target="_blank" href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.<br>
-                Official website and more information at: <a target="_blank" href="${project.appWebsiteUrl}">${project.appWebsiteUrl}</a><br>
-                Copyright &copy; ${project.appCopyrightYear}<br>
-                ${project.vendorName}, ${project.vendorCountry}<br>
-                <a target="_blank" href="${project.vendorWebsiteUrl}">${project.vendorWebsiteUrl}</a>
+                ${project.name} is open source and licensed under the <a target="_blank" href="https://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.<br>
+                Official website and more information at: <a target="_blank" href="$appWebsiteUrl">$appWebsiteUrl</a><br>
+                Copyright &copy; $appCopyrightYear $vendorName
                 """.replaceAll("[\r|\n]+", "")
-            addStringOption('doctitle', project.name + ' - ' + project.version)
+            addStringOption('doctitle', project.name + ' ' + project.version)
             addStringOption('Xdoclint:none', '-quiet')
         }
 
@@ -100,9 +103,9 @@ subprojects {
                 from("$rootDir/resources/javadoc/overview.html") {
                     filteringCharset = 'UTF-8'
                     filter(ReplaceTokens, tokens: [
-                            name: project.name,
-                            version: project.version,
-                            appName: project.appName,
+                            name: module,
+                            version: version,
+                            appName: appName,
                     ])
                 }
                 into "$projectDir/build/tmp/javadoc"
@@ -112,9 +115,9 @@ subprojects {
 
     jar {
         manifest {
-            attributes('Implementation-Title': project.appName,
+            attributes('Implementation-Title': appName,
                     'Implementation-Version': project.version,
-                    'Implementation-Vendor': project.vendorName
+                    'Implementation-Vendor': vendorName
             )
         }
         into('META-INF') {
@@ -129,21 +132,25 @@ subprojects {
                 from components.java
                 pom {
                     name = project.name
-                    url = project.vendorWebsiteUrl
+                    url = vendorWebsiteUrl
                     scm {
-                        url = project.appGitHubUrl
-                        connection = 'scm:git:' + project.appGitConnection
+                        url = appGitHubUrl
+                        connection = 'scm:git:' + appGitConnection
                     }
                 }
             }
         }
         repositories {
             maven {
-                url project.hasProperty('gitLab_maven_url') ? project.property('gitLab_maven_url') : System.getenv('GITLAB_MAVEN_URL')
-                name 'gitlab-maven'
+                url = project.hasProperty('gitLab_maven_url') ?
+                        project.property('gitLab_maven_url') :
+                        System.getenv('GITLAB_MAVEN_URL')
+                name = 'gitlab-maven'
                 credentials(HttpHeaderCredentials) {
                     name = 'Private-Token'
-                    value = project.hasProperty('gitLab_private_token') ? project.property('gitLab_private_token') : System.getenv('GITLAB_PRIVATE_TOKEN')
+                    value = project.hasProperty('gitLab_private_token') ?
+                            project.property('gitLab_private_token') :
+                            System.getenv('GITLAB_PRIVATE_TOKEN')
                 }
                 authentication {
                     header(HttpHeaderAuthentication)

@@ -1,38 +1,18 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter.hierarchy;
 
 import org.citydb.model.address.Address;
 import org.citydb.model.appearance.Appearance;
-import org.citydb.model.common.Reference;
-import org.citydb.model.common.RelationType;
 import org.citydb.model.feature.Feature;
 import org.citydb.model.geometry.Geometry;
 import org.citydb.model.geometry.ImplicitGeometry;
 import org.citydb.model.property.*;
 import org.citydb.operation.exporter.ExportHelper;
 import org.citydb.operation.exporter.property.PropertyStub;
-
-import java.util.stream.Collectors;
 
 public class PropertyBuilder {
     private final ExportHelper helper;
@@ -69,7 +49,7 @@ public class PropertyBuilder {
         Feature feature = hierarchy.getFeature(propertyStub.getFeatureId());
         if (feature != null) {
             return propertyStub.getRelationType() == RelationType.RELATES || helper.lookupAndPut(feature) ?
-                    FeatureProperty.of(propertyStub.getName(), Reference.of(helper.getOrCreateId(feature)),
+                    FeatureProperty.of(propertyStub.getName(), feature.getOrCreateObjectId(),
                             propertyStub.getRelationType()) :
                     FeatureProperty.of(propertyStub.getName(), feature, propertyStub.getRelationType());
         }
@@ -89,15 +69,14 @@ public class PropertyBuilder {
         ImplicitGeometry implicitGeometry = hierarchy.getImplicitGeometry(propertyStub.getImplicitGeometryId());
         if (implicitGeometry != null) {
             ImplicitGeometryProperty property = helper.lookupAndPut(implicitGeometry) ?
-                    ImplicitGeometryProperty.of(propertyStub.getName(), Reference.of(
-                            helper.getOrCreateId(implicitGeometry))) :
+                    ImplicitGeometryProperty.of(propertyStub.getName(), implicitGeometry.getOrCreateObjectId()) :
                     ImplicitGeometryProperty.of(propertyStub.getName(), implicitGeometry);
 
             if (propertyStub.getArrayValue() != null) {
                 property.setTransformationMatrix(propertyStub.getArrayValue().getValues().stream()
                         .filter(Value::isDouble)
                         .map(Value::doubleValue)
-                        .collect(Collectors.toList()));
+                        .toList());
             }
 
             return property.setReferencePoint(propertyStub.getReferencePoint())
@@ -118,7 +97,7 @@ public class PropertyBuilder {
         Address address = hierarchy.getAddress(propertyStub.getAddressId());
         if (address != null) {
             return helper.lookupAndPut(address) ?
-                    AddressProperty.of(propertyStub.getName(), Reference.of(helper.getOrCreateId(address))) :
+                    AddressProperty.of(propertyStub.getName(), address.getOrCreateObjectId()) :
                     AddressProperty.of(propertyStub.getName(), address);
         }
 

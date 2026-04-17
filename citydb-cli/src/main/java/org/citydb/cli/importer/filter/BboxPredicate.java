@@ -1,0 +1,89 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
+ */
+
+package org.citydb.cli.importer.filter;
+
+import org.citydb.core.exception.UncheckedException;
+import org.citydb.database.adapter.DatabaseAdapter;
+import org.citydb.database.srs.SrsException;
+import org.citydb.io.reader.filter.FilterException;
+import org.citydb.io.reader.filter.FilterPredicate;
+import org.citydb.io.reader.options.BboxMode;
+import org.citydb.model.feature.Feature;
+import org.citydb.model.geometry.Envelope;
+
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class BboxPredicate implements FilterPredicate {
+    private final Envelope bbox;
+    private final BboxMode mode;
+    private final DatabaseAdapter adapter;
+    private final int srid;
+    private final Map<Integer, Envelope> bboxes = new ConcurrentHashMap<>();
+
+    private BboxPredicate(Envelope bbox, BboxMode mode, DatabaseAdapter adapter) {
+        this.bbox = bbox;
+        this.mode = mode;
+        this.adapter = adapter;
+
+        if (bbox.getSRID().isPresent()) {
+            srid = bbox.getSRID().get();
+        } else {
+            srid = adapter.getDatabaseMetadata().getSpatialReference().getSRID();
+            bbox.setSRID(srid);
+        }
+    }
+
+    static BboxPredicate of(Envelope bbox, BboxMode mode, DatabaseAdapter adapter) {
+        return new BboxPredicate(bbox, mode, adapter);
+    }
+
+    @Override
+    public boolean test(Feature feature) throws FilterException {
+        Envelope envelope = feature.getEnvelope().orElse(null);
+        if (envelope != null) {
+            Envelope bbox = getOrTransformBbox(envelope);
+            return switch (mode) {
+                case INTERSECTS -> bbox.intersects(envelope);
+                case CONTAINS -> bbox.contains(envelope);
+                case ON_TILE -> bbox.isOnTile(envelope);
+            };
+        } else {
+            return false;
+        }
+    }
+
+    private Envelope getOrTransformBbox(Envelope envelope) throws FilterException {
+        int targetSRID = getTargetSRID(envelope);
+        if (srid == targetSRID) {
+            return bbox;
+        }
+
+        try {
+            return bboxes.computeIfAbsent(targetSRID, k -> {
+                try {
+                    return adapter.getGeometryAdapter().transform(bbox, k);
+                } catch (Exception e) {
+                    throw UncheckedException.wrap(
+                            new FilterException("Failed to transform the bounding box filter to the feature SRS.", e));
+                }
+            });
+        } catch (RuntimeException e) {
+            throw UncheckedException.unwrap(e, FilterException.class);
+        }
+    }
+
+    private int getTargetSRID(Envelope envelope) {
+        try {
+            return adapter.getGeometryAdapter().getSrsHelper().getSpatialReference(envelope)
+                    .orElse(adapter.getDatabaseMetadata().getSpatialReference())
+                    .getSRID();
+        } catch (SrsException | SQLException e) {
+            return adapter.getDatabaseMetadata().getSpatialReference().getSRID();
+        }
+    }
+}

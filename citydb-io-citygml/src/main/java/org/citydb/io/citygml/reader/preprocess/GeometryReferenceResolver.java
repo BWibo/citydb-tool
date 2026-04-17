@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader.preprocess;
@@ -34,17 +18,16 @@ import org.xmlobjects.util.copy.CopyBuilder;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
 
 public class GeometryReferenceResolver {
-    private final Supplier<CopyBuilder> copyBuilderSupplier;
+    private final CopyBuilder copyBuilder;
     private final Map<String, GeometryReference> references = new ConcurrentHashMap<>();
     private final GeometryProcessor geometryProcessor = new GeometryProcessor();
 
     private boolean createCityObjectRelations;
 
-    GeometryReferenceResolver(Supplier<CopyBuilder> copyBuilderSupplier) {
-        this.copyBuilderSupplier = copyBuilderSupplier;
+    GeometryReferenceResolver(CopyBuilder copyBuilder) {
+        this.copyBuilder = copyBuilder;
     }
 
     GeometryReferenceResolver createCityObjectRelations(boolean createCityObjectRelations) {
@@ -125,7 +108,7 @@ public class GeometryReferenceResolver {
                     if (cityObject != null) {
                         String target = reference.getTarget(featureId, childIds.get(cityObject));
                         if (target != null) {
-                            AbstractGeometry geometry = reference.createGeometryFor(featureId, copyBuilderSupplier);
+                            AbstractGeometry geometry = reference.createGeometryFor(featureId, copyBuilder);
                             property.setInlineObjectIfValid(geometry);
                             property.setHref(null);
 
@@ -212,9 +195,9 @@ public class GeometryReferenceResolver {
         private final Map<Integer, String> geometryIds = new HashMap<>();
         private final Map<String, String> targets = new HashMap<>();
 
-        AbstractGeometry createGeometryFor(int featureId, Supplier<CopyBuilder> copyBuilderSupplier) {
-            GeometryCopyBuilder copyBuilder = new GeometryCopyBuilder(copyBuilderSupplier);
-            AbstractGeometry copy = copyBuilder.copy(geometry);
+        AbstractGeometry createGeometryFor(int featureId, CopyBuilder copyBuilder) {
+            GeometryCopyBuilder geometryCopyBuilder = new GeometryCopyBuilder(copyBuilder);
+            AbstractGeometry copy = geometryCopyBuilder.copy(geometry);
             copy.setId(getOrCreateGeometryId(featureId));
             return copy;
         }

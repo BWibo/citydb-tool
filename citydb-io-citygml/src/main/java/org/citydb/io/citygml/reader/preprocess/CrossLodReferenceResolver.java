@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader.preprocess;
@@ -33,10 +17,9 @@ import org.xmlobjects.model.Child;
 import org.xmlobjects.util.copy.CopyBuilder;
 
 import java.util.*;
-import java.util.function.Supplier;
 
 public class CrossLodReferenceResolver {
-    private final Supplier<CopyBuilder> copyBuilderSupplier;
+    private final CopyBuilder copyBuilder;
     private Mode mode = Mode.RESOLVE;
     private boolean copyAppearance = true;
 
@@ -45,8 +28,8 @@ public class CrossLodReferenceResolver {
         REMOVE_LOD4_REFERENCES
     }
 
-    CrossLodReferenceResolver(Supplier<CopyBuilder> copyBuilderSupplier) {
-        this.copyBuilderSupplier = copyBuilderSupplier;
+    CrossLodReferenceResolver(CopyBuilder copyBuilder) {
+        this.copyBuilder = copyBuilder;
     }
 
     CrossLodReferenceResolver setMode(Mode mode) {
@@ -69,12 +52,12 @@ public class CrossLodReferenceResolver {
         Map<AbstractGeometry, List<GeometryProperty<?>>> references = lodReferenceCollector.process(feature);
         if (!references.isEmpty()) {
             if (mode == Mode.RESOLVE) {
-                GeometryCopyBuilder copyBuilder = new GeometryCopyBuilder(copyBuilderSupplier)
+                GeometryCopyBuilder geometryCopyBuilder = new GeometryCopyBuilder(copyBuilder)
                         .copyAppearance(copyAppearance)
                         .withAppearanceHelper(new AppearanceHelper(feature));
                 for (Map.Entry<AbstractGeometry, List<GeometryProperty<?>>> entry : references.entrySet()) {
                     GeometryProperty<?> targetProperty = getTargetProperty(entry.getValue());
-                    AbstractGeometry geometry = copyBuilder.copy(entry.getKey(), feature);
+                    AbstractGeometry geometry = geometryCopyBuilder.copy(entry.getKey(), feature);
 
                     targetProperty.setInlineObjectIfValid(geometry);
                     targetProperty.setHref(null);

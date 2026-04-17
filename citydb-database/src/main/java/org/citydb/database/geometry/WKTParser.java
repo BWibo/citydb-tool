@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.database.geometry;
@@ -50,16 +34,16 @@ public class WKTParser {
     private Geometry<?> read(StreamTokenizer tokenizer) throws GeometryException, IOException {
         Integer srid = readSRID(tokenizer);
         String geometryType = nextWord(tokenizer);
-        int dimension = readDimension(tokenizer);
+        boolean is3D = has3DFlag(tokenizer);
 
         Geometry<?> geometry = switch (geometryType) {
-            case WKTConstants.POINT -> readPoint(tokenizer, dimension);
-            case WKTConstants.LINESTRING -> readLineString(tokenizer, dimension);
-            case WKTConstants.POLYGON -> readPolygon(tokenizer, dimension);
-            case WKTConstants.MULTIPOINT -> readMultiPoint(tokenizer, dimension);
-            case WKTConstants.MULTILINESTRING -> readMultiLineString(tokenizer, dimension);
-            case WKTConstants.MULTIPOLYGON -> readMultiPolygon(tokenizer, dimension);
-            case WKTConstants.POLYHEDRALSURFACE -> readSolid(tokenizer, dimension);
+            case WKTConstants.POINT -> readPoint(tokenizer, is3D);
+            case WKTConstants.LINESTRING -> readLineString(tokenizer, is3D);
+            case WKTConstants.POLYGON -> readPolygon(tokenizer, is3D);
+            case WKTConstants.MULTIPOINT -> readMultiPoint(tokenizer, is3D);
+            case WKTConstants.MULTILINESTRING -> readMultiLineString(tokenizer, is3D);
+            case WKTConstants.MULTIPOLYGON -> readMultiPolygon(tokenizer, is3D);
+            case WKTConstants.POLYHEDRALSURFACE -> readSolid(tokenizer, is3D);
             case WKTConstants.GEOMETRYCOLLECTION -> readGeometryCollection(tokenizer);
             default -> throw new GeometryException("Unsupported geometry type '" + geometryType + "'.");
         };
@@ -67,85 +51,81 @@ public class WKTParser {
         return geometry.setSRID(srid);
     }
 
-    private Point readPoint(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
-        List<Coordinate> coordinates = getCoordinates(tokenizer, dimension);
+    private Point readPoint(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
+        List<Coordinate> coordinates = getCoordinates(tokenizer, is3D);
         return Point.of(coordinates.get(0));
     }
 
-    private LineString readLineString(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
-        return LineString.of(getCoordinates(tokenizer, dimension));
+    private LineString readLineString(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
+        return LineString.of(getCoordinates(tokenizer, is3D));
     }
 
-    private LinearRing readLinearRing(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
-        return LinearRing.of(getCoordinates(tokenizer, dimension));
+    private LinearRing readLinearRing(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
+        return LinearRing.of(getCoordinates(tokenizer, is3D));
     }
 
-    private Polygon readPolygon(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private Polygon readPolygon(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         if (nextEmptyOrOpener(tokenizer).equals(WKTConstants.EMPTY)) {
             return Polygon.empty();
         }
 
-        LinearRing shell = readLinearRing(tokenizer, dimension);
+        LinearRing shell = readLinearRing(tokenizer, is3D);
         List<LinearRing> holes = new ArrayList<>();
         while (nextCloserOrComma(tokenizer).equals(COMMA)) {
-            holes.add(readLinearRing(tokenizer, dimension));
+            holes.add(readLinearRing(tokenizer, is3D));
         }
 
         return Polygon.of(shell, holes);
     }
 
-    private List<Polygon> readPolygons(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private List<Polygon> readPolygons(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         List<Polygon> polygons = new ArrayList<>();
         do {
-            polygons.add(readPolygon(tokenizer, dimension));
+            polygons.add(readPolygon(tokenizer, is3D));
         } while (nextCloserOrComma(tokenizer).equals(COMMA));
 
         return polygons;
     }
 
-    private MultiPoint readMultiPoint(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private MultiPoint readMultiPoint(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         if (nextEmptyOrOpener(tokenizer).equals(WKTConstants.EMPTY)) {
             return MultiPoint.empty();
         }
 
         boolean nested = lookAheadWord(tokenizer).equals(L_PAREN);
         List<Point> points = new ArrayList<>();
-        points.add(nested ?
-                readPoint(tokenizer, dimension) :
-                Point.of(getCoordinate(tokenizer, dimension)));
-
-        while (nextCloserOrComma(tokenizer).equals(COMMA)) {
+        do {
             points.add(nested ?
-                    readPoint(tokenizer, dimension) :
-                    Point.of(getCoordinate(tokenizer, dimension)));
-        }
+                    readPoint(tokenizer, is3D) :
+                    Point.of(getCoordinate(tokenizer, is3D)));
+        } while (nextCloserOrComma(tokenizer).equals(COMMA));
 
         return MultiPoint.of(points);
     }
 
-    private MultiLineString readMultiLineString(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private MultiLineString readMultiLineString(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         if (nextEmptyOrOpener(tokenizer).equals(WKTConstants.EMPTY)) {
             return MultiLineString.empty();
         }
 
         List<LineString> lineStrings = new ArrayList<>();
         do {
-            lineStrings.add(readLineString(tokenizer, dimension));
+            lineStrings.add(readLineString(tokenizer, is3D));
         } while (nextCloserOrComma(tokenizer).equals(COMMA));
 
         return MultiLineString.of(lineStrings);
     }
 
-    private MultiSurface readMultiPolygon(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private MultiSurface readMultiPolygon(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         return nextEmptyOrOpener(tokenizer).equals(WKTConstants.EMPTY) ?
                 MultiSurface.empty() :
-                MultiSurface.of(readPolygons(tokenizer, dimension));
+                MultiSurface.of(readPolygons(tokenizer, is3D));
     }
 
-    private Solid readSolid(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private Solid readSolid(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         return nextEmptyOrOpener(tokenizer).equals(WKTConstants.EMPTY) ?
                 Solid.empty() :
-                Solid.of(CompositeSurface.of(readPolygons(tokenizer, dimension)));
+                Solid.of(CompositeSurface.of(readPolygons(tokenizer, is3D)));
     }
 
     private MultiSolid readGeometryCollection(StreamTokenizer tokenizer) throws GeometryException, IOException {
@@ -177,35 +157,40 @@ public class WKTParser {
         }
     }
 
-    private int readDimension(StreamTokenizer tokenizer) throws GeometryException, IOException {
+    private boolean has3DFlag(StreamTokenizer tokenizer) throws GeometryException, IOException {
         String coordinateFlag = lookAheadWord(tokenizer);
         return switch (coordinateFlag) {
             case WKTConstants.Z -> {
                 tokenizer.nextToken();
-                yield 3;
+                yield true;
             }
             case WKTConstants.M, WKTConstants.ZM ->
                     throw new GeometryException("Unsupported WKT coordinate flag '" + coordinateFlag + "'.");
-            default -> 2;
+            default -> false;
         };
     }
 
-    private Coordinate getCoordinate(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private Coordinate getCoordinate(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         double x = nextNumber(tokenizer);
         double y = nextNumber(tokenizer);
-        return dimension == 2 ?
-                Coordinate.of(x, y) :
-                Coordinate.of(x, y, nextNumber(tokenizer));
+        if (is3D) {
+            return Coordinate.of(x, y, nextNumber(tokenizer));
+        } else {
+            String word = lookAheadWord(tokenizer);
+            return word.equals(COMMA) || word.equals(R_PAREN) ?
+                    Coordinate.of(x, y) :
+                    Coordinate.of(x, y, nextNumber(tokenizer));
+        }
     }
 
-    private List<Coordinate> getCoordinates(StreamTokenizer tokenizer, int dimension) throws GeometryException, IOException {
+    private List<Coordinate> getCoordinates(StreamTokenizer tokenizer, boolean is3D) throws GeometryException, IOException {
         if (nextEmptyOrOpener(tokenizer).equals(WKTConstants.EMPTY)) {
             return Collections.emptyList();
         }
 
         List<Coordinate> coordinates = new ArrayList<>();
         do {
-            coordinates.add(getCoordinate(tokenizer, dimension));
+            coordinates.add(getCoordinate(tokenizer, is3D));
         } while (nextCloserOrComma(tokenizer).equals(COMMA));
 
         return coordinates;
@@ -218,12 +203,12 @@ public class WKTParser {
             } else {
                 try {
                     return Double.parseDouble(tokenizer.sval);
-                } catch (NumberFormatException ex) {
+                } catch (NumberFormatException e) {
                     throw new GeometryException("Invalid number: " + tokenizer.sval);
                 }
             }
         } else {
-            throw new GeometryException("Failed to get next number value.");
+            throw new GeometryException("Expected number value but found '" + (char) tokenizer.ttype + "'.");
         }
     }
 

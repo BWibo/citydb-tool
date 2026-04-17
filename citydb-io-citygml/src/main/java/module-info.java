@@ -1,6 +1,5 @@
 module org.citydb.io.citygml {
     requires org.citydb.io;
-    requires transitive org.citydb.logging;
     requires transitive org.citygml4j.xml;
     requires transitive org.citygml4j.cityjson;
 
@@ -14,6 +13,7 @@ module org.citydb.io.citygml {
     exports org.citydb.io.citygml.adapter.cityobjectgroup;
     exports org.citydb.io.citygml.adapter.construction;
     exports org.citydb.io.citygml.adapter.core;
+    exports org.citydb.io.citygml.adapter.dynamizer;
     exports org.citydb.io.citygml.adapter.generics;
     exports org.citydb.io.citygml.adapter.geometry.builder;
     exports org.citydb.io.citygml.adapter.geometry.serializer;
@@ -27,6 +27,7 @@ module org.citydb.io.citygml {
     exports org.citydb.io.citygml.annotation;
     exports org.citydb.io.citygml.builder;
     exports org.citydb.io.citygml.reader;
+    exports org.citydb.io.citygml.reader.options;
     exports org.citydb.io.citygml.reader.preprocess;
     exports org.citydb.io.citygml.reader.util;
     exports org.citydb.io.citygml.serializer;

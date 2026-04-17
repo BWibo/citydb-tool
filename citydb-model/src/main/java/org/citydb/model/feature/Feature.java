@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.model.feature;
@@ -24,6 +8,8 @@ package org.citydb.model.feature;
 import org.citydb.model.common.*;
 import org.citydb.model.geometry.Envelope;
 import org.citydb.model.property.*;
+import org.citydb.model.util.GeometryInfo;
+import org.citydb.model.walker.ModelWalker;
 
 import java.time.OffsetDateTime;
 import java.util.Collection;
@@ -34,8 +20,15 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class Feature extends ModelObject<Feature> implements Describable<FeatureDescriptor> {
+public class Feature extends Child implements Identifiable, Visitable, Describable<FeatureDescriptor> {
     private final Name featureType;
+    private String objectId;
+    private String identifier;
+    private String identifierCodeSpace;
+    private OffsetDateTime creationDate;
+    private OffsetDateTime terminationDate;
+    private OffsetDateTime validFrom;
+    private OffsetDateTime validTo;
     private Envelope envelope;
     private OffsetDateTime lastModificationDate;
     private String updatingPerson;
@@ -68,6 +61,75 @@ public class Feature extends ModelObject<Feature> implements Describable<Feature
 
     public Name getFeatureType() {
         return featureType;
+    }
+
+    @Override
+    public Optional<String> getObjectId() {
+        return Optional.ofNullable(objectId);
+    }
+
+    @Override
+    public Feature setObjectId(String objectId) {
+        this.objectId = objectId;
+        return this;
+    }
+
+    @Override
+    public Optional<String> getIdentifier() {
+        return Optional.ofNullable(identifier);
+    }
+
+    @Override
+    public Feature setIdentifier(String identifier) {
+        this.identifier = identifier;
+        return this;
+    }
+
+    @Override
+    public Optional<String> getIdentifierCodeSpace() {
+        return Optional.ofNullable(identifierCodeSpace);
+    }
+
+    @Override
+    public Feature setIdentifierCodeSpace(String identifierCodeSpace) {
+        this.identifierCodeSpace = identifierCodeSpace;
+        return this;
+    }
+
+    public Optional<OffsetDateTime> getCreationDate() {
+        return Optional.ofNullable(creationDate);
+    }
+
+    public Feature setCreationDate(OffsetDateTime creationDate) {
+        this.creationDate = creationDate;
+        return this;
+    }
+
+    public Optional<OffsetDateTime> getTerminationDate() {
+        return Optional.ofNullable(terminationDate);
+    }
+
+    public Feature setTerminationDate(OffsetDateTime terminationDate) {
+        this.terminationDate = terminationDate;
+        return this;
+    }
+
+    public Optional<OffsetDateTime> getValidFrom() {
+        return Optional.ofNullable(validFrom);
+    }
+
+    public Feature setValidFrom(OffsetDateTime validFrom) {
+        this.validFrom = validFrom;
+        return this;
+    }
+
+    public Optional<OffsetDateTime> getValidTo() {
+        return Optional.ofNullable(validTo);
+    }
+
+    public Feature setValidTo(OffsetDateTime validTo) {
+        this.validTo = validTo;
+        return this;
     }
 
     public Optional<Envelope> getEnvelope() {
@@ -299,9 +361,50 @@ public class Feature extends ModelObject<Feature> implements Describable<Feature
             addAppearance(appearanceProperty);
         } else if (property instanceof AddressProperty addressProperty) {
             addAddress(addressProperty);
-        }  else if (property instanceof Attribute attribute) {
+        } else if (property instanceof Attribute attribute) {
             addAttribute(attribute);
         }
+    }
+
+    public GeometryInfo getGeometryInfo() {
+        return getGeometryInfo(GeometryInfo.Mode.SKIP_NESTED_FEATURES);
+    }
+
+    public GeometryInfo getGeometryInfo(GeometryInfo.Mode mode) {
+        GeometryInfo geometryInfo = new GeometryInfo();
+        accept(new ModelWalker() {
+            @Override
+            public void visit(GeometryProperty property) {
+                geometryInfo.add(property);
+            }
+
+            @Override
+            public void visit(ImplicitGeometryProperty property) {
+                geometryInfo.add(property);
+            }
+
+            @Override
+            public void visit(FeatureProperty property) {
+                if (mode != null && switch (mode) {
+                    case SKIP_NESTED_FEATURES -> false;
+                    case INCLUDE_CONTAINED_FEATURES -> property.getRelationType() == RelationType.CONTAINS;
+                    case INCLUDE_ALL_NESTED_FEATURES -> true;
+                }) {
+                    super.visit(property);
+                }
+            }
+        });
+
+        return geometryInfo;
+    }
+
+    public Feature getRootFeature() {
+        Feature root = this, parent = this;
+        while ((parent = parent.getParent(Feature.class)) != null) {
+            root = parent;
+        }
+
+        return root;
     }
 
     @Override
@@ -318,10 +421,5 @@ public class Feature extends ModelObject<Feature> implements Describable<Feature
     @Override
     public void accept(Visitor visitor) {
         visitor.visit(this);
-    }
-
-    @Override
-    protected Feature self() {
-        return this;
     }
 }

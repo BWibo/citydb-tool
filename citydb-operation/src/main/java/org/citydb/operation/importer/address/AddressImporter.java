@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.importer.address;
@@ -33,9 +17,7 @@ import org.citydb.operation.importer.common.DatabaseImporter;
 import org.citydb.operation.importer.reference.CacheType;
 
 import java.sql.SQLException;
-import java.sql.Types;
 import java.util.Collections;
-import java.util.stream.Collectors;
 
 public class AddressImporter extends DatabaseImporter {
 
@@ -57,37 +39,26 @@ public class AddressImporter extends DatabaseImporter {
 
         stmt.setLong(1, addressId);
         stmt.setString(2, objectId);
-        stmt.setString(3, address.getIdentifier().orElse(null));
-        stmt.setString(4, address.getIdentifierCodeSpace().orElse(null));
-        stmt.setString(5, address.getStreet().orElse(null));
-        stmt.setString(6, address.getHouseNumber().orElse(null));
-        stmt.setString(7, address.getPoBox().orElse(null));
-        stmt.setObject(8, address.getZipCode().orElse(null));
-        stmt.setString(9, address.getCity().orElse(null));
-        stmt.setString(10, address.getState().orElse(null));
-        stmt.setString(11, address.getCountry().orElse(null));
+        setStringOrNull(3, address.getIdentifier().orElse(null));
+        setStringOrNull(4, address.getIdentifierCodeSpace().orElse(null));
+        setStringOrNull(5, address.getStreet().orElse(null));
+        setStringOrNull(6, address.getHouseNumber().orElse(null));
+        setStringOrNull(7, address.getPoBox().orElse(null));
+        setStringOrNull(8, address.getZipCode().orElse(null));
+        setStringOrNull(9, address.getCity().orElse(null));
+        setStringOrNull(10, address.getState().orElse(null));
+        setStringOrNull(11, address.getCountry().orElse(null));
 
-        String arrayValue = address.getFreeText()
-                .map(array -> JSONArray.copyOf(array.getValues().stream()
+        JSONArray arrayValue = address.getFreeText()
+                .map(array -> new JSONArray(array.getValues().stream()
                         .map(Value::rawValue)
-                        .collect(Collectors.toList())).toString())
+                        .toList()))
                 .orElse(null);
-        if (arrayValue != null) {
-            stmt.setObject(12, arrayValue, Types.OTHER);
-        } else {
-            stmt.setNull(12, Types.OTHER);
-        }
 
-        Object multiPoint = getGeometry(address.getMultiPoint().orElse(null), true);
-        if (multiPoint != null) {
-            stmt.setObject(13, multiPoint, adapter.getGeometryAdapter().getGeometrySQLType());
-        } else {
-            stmt.setNull(13, adapter.getGeometryAdapter().getGeometrySQLType(),
-                    adapter.getGeometryAdapter().getGeometryTypeName());
-        }
-
-        stmt.setString(14, address.getGenericContent().orElse(null));
-        stmt.setString(15, address.getGenericContentMimeType().orElse(null));
+        setJsonOrNull(12, getJson(arrayValue));
+        setGeometryOrNull(13, getGeometry(address.getMultiPoint().orElse(null), true));
+        setStringOrNull(14, address.getGenericContent().orElse(null));
+        setStringOrNull(15, address.getGenericContentMimeType().orElse(null));
 
         addBatch();
         cacheTarget(CacheType.ADDRESS, objectId, addressId);

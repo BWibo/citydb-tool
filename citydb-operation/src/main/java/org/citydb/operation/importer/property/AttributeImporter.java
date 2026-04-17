@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.importer.property;
@@ -28,10 +12,7 @@ import org.citydb.operation.importer.ImportException;
 import org.citydb.operation.importer.ImportHelper;
 
 import java.sql.SQLException;
-import java.sql.Types;
-import java.time.OffsetDateTime;
 import java.util.Collections;
-import java.util.stream.Collectors;
 
 public class AttributeImporter extends PropertyImporter {
 
@@ -58,52 +39,29 @@ public class AttributeImporter extends PropertyImporter {
     }
 
     private PropertyDescriptor doImport(Attribute attribute, long propertyId, long parentId, long featureId) throws ImportException, SQLException {
-        Long intValue = attribute.getIntValue().orElse(null);
-        if (intValue != null) {
-            stmt.setLong(7, intValue);
-        } else {
-            stmt.setNull(7, Types.BIGINT);
-        }
+        setLongOrNull(7, attribute.getIntValue().orElse(null));
+        setDoubleOrNull(8, attribute.getDoubleValue().orElse(null));
+        setStringOrNull(9, attribute.getStringValue().orElse(null));
+        setTimestampOrNull(10, attribute.getTimeStamp().orElse(null));
+        setStringOrNull(11, attribute.getURI().orElse(null));
+        setStringOrNull(12, attribute.getCodeSpace().orElse(null));
+        setStringOrNull(13, attribute.getUom().orElse(null));
 
-        Double doubleValue = attribute.getDoubleValue().orElse(null);
-        if (doubleValue != null) {
-            stmt.setDouble(8, doubleValue);
-        } else {
-            stmt.setNull(8, Types.DOUBLE);
-        }
-
-        stmt.setString(9, attribute.getStringValue().orElse(null));
-
-        OffsetDateTime timestamp = attribute.getTimeStamp().orElse(null);
-        if (timestamp != null) {
-            stmt.setObject(10, timestamp);
-        } else {
-            stmt.setNull(10, Types.TIMESTAMP);
-        }
-
-        stmt.setString(11, attribute.getURI().orElse(null));
-        stmt.setString(12, attribute.getCodeSpace().orElse(null));
-        stmt.setString(13, attribute.getUom().orElse(null));
-
-        String arrayValue = attribute.getArrayValue()
-                .map(array -> JSONArray.copyOf(array.getValues().stream()
+        JSONArray arrayValue = attribute.getArrayValue()
+                .map(array -> new JSONArray(array.getValues().stream()
                         .map(Value::rawValue)
-                        .collect(Collectors.toList())).toString())
+                        .toList()))
                 .orElse(null);
-        if (arrayValue != null) {
-            stmt.setObject(14, arrayValue, Types.OTHER);
-        } else {
-            stmt.setNull(14, Types.OTHER);
-        }
 
-        stmt.setString(15, attribute.getGenericContent().orElse(null));
-        stmt.setString(16, attribute.getGenericContentMimeType().orElse(null));
+        setJsonOrNull(14, getJson(arrayValue));
+        setStringOrNull(15, attribute.getGenericContent().orElse(null));
+        setStringOrNull(16, attribute.getGenericContentMimeType().orElse(null));
 
         PropertyDescriptor descriptor = super.doImport(attribute, propertyId, parentId, featureId);
 
         if (attribute.hasProperties()) {
             for (Property<?> child : attribute.getProperties().getAll()) {
-                if (child instanceof Attribute childAttribute)  {
+                if (child instanceof Attribute childAttribute) {
                     doImport(childAttribute, parentId, featureId);
                 } else if (child instanceof FeatureProperty property) {
                     tableHelper.getOrCreateImporter(FeaturePropertyImporter.class)

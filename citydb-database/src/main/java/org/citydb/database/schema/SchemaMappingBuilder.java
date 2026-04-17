@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.database.schema;
@@ -66,7 +50,7 @@ public class SchemaMappingBuilder {
 
     private void buildDataTypes(SchemaMapping schemaMapping, Connection connection, DatabaseAdapter adapter) throws SchemaException, SQLException {
         try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery("select id, supertype_id, typename, namespace_id, schema " +
+             ResultSet rs = stmt.executeQuery("select id, supertype_id, typename, is_abstract, namespace_id, schema " +
                      "from " + adapter.getConnectionDetails().getSchema() + "." + Table.DATATYPE)) {
             while (rs.next()) {
                 int id = rs.getInt("id");
@@ -92,8 +76,10 @@ public class SchemaMappingBuilder {
                         if (object != null) {
                             schemaMapping.addDataType(DataType.of(id,
                                     Name.of(typeName, namespace.getURI()),
+                                    rs.getInt("is_abstract") != 0,
                                     superTypeId,
-                                    object));
+                                    object,
+                                    adapter));
                         } else {
                             throw new SchemaException("Failed to parse JSON schema of data type (ID: " + id + ").");
                         }
@@ -107,7 +93,7 @@ public class SchemaMappingBuilder {
 
     private void buildFeatureTypes(SchemaMapping schemaMapping, Connection connection, DatabaseAdapter adapter) throws SchemaException, SQLException {
         try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery("select id, superclass_id, classname, is_toplevel, " +
+             ResultSet rs = stmt.executeQuery("select id, superclass_id, classname, is_abstract, is_toplevel, " +
                      "namespace_id, schema " +
                      "from " + adapter.getConnectionDetails().getSchema() + "." + Table.OBJECTCLASS)) {
             while (rs.next()) {
@@ -134,9 +120,11 @@ public class SchemaMappingBuilder {
                         if (object != null) {
                             schemaMapping.addFeatureType(FeatureType.of(id,
                                     Name.of(className, namespace.getURI()),
+                                    rs.getInt("is_abstract") != 0,
                                     rs.getInt("is_toplevel") != 0,
                                     superTypeId,
-                                    object));
+                                    object,
+                                    adapter));
                         } else {
                             throw new SchemaException("Failed to parse JSON schema of feature type (ID: " + id + ").");
                         }

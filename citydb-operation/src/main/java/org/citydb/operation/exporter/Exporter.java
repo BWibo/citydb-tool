@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter;
@@ -76,7 +60,7 @@ public class Exporter {
             helpers = ConcurrentHashMap.newKeySet();
             service = ExecutorHelper.newFixedAndBlockingThreadPool(options.getNumberOfThreads() > 0 ?
                     options.getNumberOfThreads() :
-                    Math.max(2, Runtime.getRuntime().availableProcessors()));
+                    Math.max(2, Runtime.getRuntime().availableProcessors()), 1000);
 
             countLatch = new CountLatch();
             contexts = ThreadLocal.withInitial(() -> {
@@ -99,7 +83,11 @@ public class Exporter {
     }
 
     public CompletableFuture<Feature> exportFeature(long id) {
-        return doExport(() -> contexts.get().exportFeature(id));
+        return exportFeature(id, 0);
+    }
+
+    public CompletableFuture<Feature> exportFeature(long id, long sequenceId) {
+        return doExport(() -> contexts.get().exportFeature(id, sequenceId));
     }
 
     public CompletableFuture<ImplicitGeometry> exportImplicitGeometry(long id) {
@@ -124,6 +112,8 @@ public class Exporter {
             } else {
                 result.completeExceptionally(new ExportException("Illegal to export data outside a session."));
             }
+        } else {
+            result.cancel(true);
         }
 
         return result;

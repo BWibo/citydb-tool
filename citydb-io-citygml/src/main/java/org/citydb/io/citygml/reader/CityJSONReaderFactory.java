@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader;
@@ -33,35 +17,24 @@ import org.citygml4j.core.model.CityGMLVersion;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.security.SecureRandom;
 import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class CityJSONReaderFactory {
     private final CityJSONContext context;
+    private final ReadOptions options;
+    private final CityJSONFormatOptions formatOptions;
     private final String seed;
-    private ReadOptions options;
-    private CityJSONFormatOptions formatOptions = new CityJSONFormatOptions();
 
-    private CityJSONReaderFactory(CityJSONContext context) {
+    private CityJSONReaderFactory(CityJSONContext context, ReadOptions options, CityJSONFormatOptions formatOptions) {
         this.context = Objects.requireNonNull(context, "CityJSON context must not be null.");
-        seed = "citydb-" + Long.toUnsignedString(new SecureRandom().nextLong() ^ System.currentTimeMillis());
+        this.options = Objects.requireNonNull(options, "The read options must not be null.");
+        this.formatOptions = Objects.requireNonNull(formatOptions, "The format options must not be null.");
+        seed = "citydb-" + Long.toUnsignedString(ThreadLocalRandom.current().nextLong() ^ System.currentTimeMillis());
     }
 
-    public static CityJSONReaderFactory newInstance(CityJSONContext context) {
-        return new CityJSONReaderFactory(context);
-    }
-
-    public CityJSONReaderFactory setReadOptions(ReadOptions options) {
-        this.options = options;
-        return this;
-    }
-
-    public CityJSONReaderFactory setFormatOptions(CityJSONFormatOptions formatOptions) {
-        if (formatOptions != null) {
-            this.formatOptions = formatOptions;
-        }
-
-        return this;
+    public static CityJSONReaderFactory newInstance(CityJSONContext context, ReadOptions options, CityJSONFormatOptions formatOptions) {
+        return new CityJSONReaderFactory(context, options, formatOptions);
     }
 
     public CityJSONReader createReader(InputFile file) throws ReadException {

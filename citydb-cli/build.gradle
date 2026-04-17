@@ -1,19 +1,36 @@
 import org.apache.tools.ant.filters.ReplaceTokens
 
+import java.util.regex.Matcher
+import java.util.regex.Pattern
+
 plugins {
     id 'application'
 }
 
+configurations {
+    citydb {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+def log4j_version = '2.25.3'
+
 dependencies {
-    implementation project(':citydb-config')
-    implementation project(':citydb-io')
-    implementation project(':citydb-io-citygml')
-    implementation project(':citydb-logging')
-    implementation project(':citydb-database')
-    implementation project(':citydb-operation')
-    implementation project(':citydb-database-postgres')
+    api project(':citydb-database')
+    api project(':citydb-io')
+    api project(':citydb-operation')
     api project(':citydb-plugin')
-    api 'info.picocli:picocli:4.7.5'
+    api project(':citydb-query')
+    api project(':citydb-util')
+    api 'info.picocli:picocli:4.7.7'
+    implementation project(':citydb-config')
+    implementation project(':citydb-database-postgres')
+    implementation project(':citydb-io-citygml')
+    implementation "org.apache.logging.log4j:log4j-core:$log4j_version"
+    implementation "org.apache.logging.log4j:log4j-slf4j2-impl:$log4j_version"
+    implementation "org.apache.logging.log4j:log4j-jul:$log4j_version"
+    citydb 'org.citydb:3dcitydb:5.1.3'
 }
 
 processResources {
@@ -21,10 +38,10 @@ processResources {
     filteringCharset = 'ISO-8859-1'
     filesMatching('**/application.properties') {
         filter(ReplaceTokens, tokens: [
-                name: project.appName,
-                version: project.version,
-                copyrightYear: project.appCopyrightYear,
-                vendor: project.vendorName
+                name: appName,
+                version: version,
+                copyrightYear: appCopyrightYear,
+                vendor: vendorName
         ])
     }
 }
@@ -32,7 +49,7 @@ processResources {
 application {
     mainModule = 'org.citydb.cli'
     mainClass = 'org.citydb.cli.Launcher'
-    applicationName = project.appCliCommand
+    applicationName = appCliCommand
     executableDir = ''
 
     startScripts {
@@ -40,23 +57,36 @@ application {
             def windows = getWindowsScript()
             def unix = getUnixScript()
             windows.text = windows.text.replaceFirst('set APP_HOME=.*', '$0\r\nset WORKING_DIR=%CD%')
-                    .replaceFirst(' -classpath "%CLASSPATH%" ', '')
-            unix.text = unix.text.replaceFirst('\nAPP_HOME=.*', '$0\nexport APP_HOME\nexport WORKING_DIR=\\$(pwd -P)')
-                    .replaceFirst('-classpath "\\$CLASSPATH"', '')
+                    .replaceFirst('set MODULE_PATH=.*', 'set MODULE_PATH=%APP_HOME%\\\\lib')
+            unix.text = unix.text.replaceFirst('(?m)^MODULE_PATH=.*',
+                    'MODULE_PATH=\\$APP_HOME/lib\n\nexport APP_HOME\nexport WORKING_DIR=\\$(pwd -P)')
         }
     }
 }
 
 distributions {
+    def version = parseVersion("$project.version")
+
     main {
-        distributionBaseName = project.appDistName
+        distributionBaseName = appName
         contents {
             into('license') {
                 from "$rootDir/resources/license/APACHE-2.0.txt"
                 from processLicense
             }
             into('3dcitydb') {
-                from "$rootDir/resources/3dcitydb"
+                from {
+                    zipTree(configurations.citydb.singleFile)
+                }
+            }
+            into('json-schema') {
+                from "$rootDir/resources/json-schema"
+                filesMatching('**/*.json') {
+                    filter(ReplaceTokens, tokens: [
+                            major: version["major"],
+                            minor: version["minor"]
+                    ])
+                }
             }
             into('samples') {
                 from "$rootDir/resources/samples"
@@ -66,11 +96,26 @@ distributions {
             }
         }
     }
+
+    docker {
+        distributionBaseName = "$appName-docker"
+        contents {
+            with distributions.main.contents
+            exclude('*.bat')
+        }
+    }
 }
 
-tasks.register('buildBundle', Zip) {
-    dependsOn installDist
-    from "$projectDir/build/install/$project.appDistName"
-    destinationDirectory = distZip.destinationDirectory.get()
-    archiveFileName = project.appDistName + '-' + project.version + '.zip'
+static def parseVersion(String versionString) {
+    def version = [:]
+    Matcher matcher = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+).*?").matcher(versionString)
+    if (matcher.matches()) {
+        version["major"] = matcher.group(1)
+        version["minor"] = matcher.group(2)
+        version["patch"] = matcher.group(3)
+        version["version"] = versionString
+    } else {
+        throw new GradleException("Failed to parse the version '$versionString'. Use SemVer notation.")
+    }
+    version
 }

@@ -1,47 +1,26 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader;
 
 import org.citydb.config.SerializableConfig;
-import org.citydb.io.reader.option.InputFormatOptions;
+import org.citydb.io.citygml.reader.options.FormatOptions;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 @SerializableConfig(name = "CityGML")
-public class CityGMLFormatOptions implements InputFormatOptions {
-    private boolean resolveGeometryReferences = true;
+public class CityGMLFormatOptions extends FormatOptions<CityGMLFormatOptions> {
     private boolean resolveCrossLodReferences = true;
     private boolean createCityObjectRelations = true;
     private boolean useLod4AsLod3;
     private boolean mapLod0RoofEdge;
     private boolean mapLod1MultiSurfaces;
-    private boolean importXALSource;
-
-    public boolean isResolveGeometryReferences() {
-        return resolveGeometryReferences;
-    }
-
-    public CityGMLFormatOptions setResolveGeometryReferences(boolean resolveGeometryReferences) {
-        this.resolveGeometryReferences = resolveGeometryReferences;
-        return this;
-    }
+    private boolean includeXALSource;
+    private List<String> xslTransforms;
 
     public boolean isResolveCrossLodReferences() {
         return resolveCrossLodReferences;
@@ -88,12 +67,46 @@ public class CityGMLFormatOptions implements InputFormatOptions {
         return this;
     }
 
-    public boolean isImportXALSource() {
-        return importXALSource;
+    public boolean isIncludeXALSource() {
+        return includeXALSource;
     }
 
-    public CityGMLFormatOptions setImportXALSource(boolean importXALSource) {
-        this.importXALSource = importXALSource;
+    public CityGMLFormatOptions setIncludeXALSource(boolean includeXALSource) {
+        this.includeXALSource = includeXALSource;
+        return this;
+    }
+
+    public boolean hasXslTransforms() {
+        return xslTransforms != null && !xslTransforms.isEmpty();
+    }
+
+    public List<String> getXslTransforms() {
+        if (xslTransforms == null) {
+            xslTransforms = new ArrayList<>();
+        }
+
+        return xslTransforms;
+    }
+
+    public CityGMLFormatOptions setXslTransforms(List<String> xslTransforms) {
+        this.xslTransforms = xslTransforms;
+        return this;
+    }
+
+    public CityGMLFormatOptions addXslTransform(Path xslTransform) {
+        return addXslTransform(xslTransform != null ? xslTransform.toString() : null);
+    }
+
+    public CityGMLFormatOptions addXslTransform(String xslTransform) {
+        if (xslTransform != null) {
+            getXslTransforms().add(xslTransform);
+        }
+
+        return this;
+    }
+
+    @Override
+    protected CityGMLFormatOptions self() {
         return this;
     }
 }

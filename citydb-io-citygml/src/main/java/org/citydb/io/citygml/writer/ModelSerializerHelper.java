@@ -1,28 +1,10 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.writer;
 
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
 import org.citydb.core.cache.PersistentMapStore;
 import org.citydb.io.citygml.CityGMLAdapterContext;
 import org.citydb.io.citygml.adapter.address.AddressAdapter;
@@ -40,11 +22,8 @@ import org.citydb.io.citygml.writer.util.CityGMLVersionHelper;
 import org.citydb.io.citygml.writer.util.GlobalFeatureWriter;
 import org.citydb.io.writer.WriteException;
 import org.citydb.io.writer.WriteOptions;
-import org.citydb.io.writer.option.SpatialReference;
-import org.citydb.logging.LoggerManager;
 import org.citydb.model.appearance.Appearance;
 import org.citydb.model.common.Child;
-import org.citydb.model.common.ExternalFile;
 import org.citydb.model.common.Name;
 import org.citydb.model.feature.Feature;
 import org.citydb.model.feature.FeatureDescriptor;
@@ -52,11 +31,14 @@ import org.citydb.model.geometry.Geometry;
 import org.citydb.model.geometry.MultiLineString;
 import org.citydb.model.geometry.SolidCollection;
 import org.citydb.model.geometry.SurfaceCollection;
-import org.citydb.model.property.ImplicitGeometryProperty;
 import org.citydb.model.property.*;
+import org.citydb.model.property.ImplicitGeometryProperty;
 import org.citygml4j.core.model.CityGMLVersion;
-import org.citygml4j.core.model.core.AddressProperty;
 import org.citygml4j.core.model.core.*;
+import org.citygml4j.core.model.core.AddressProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.xmlobjects.XMLObjects;
 import org.xmlobjects.gml.model.base.*;
 import org.xmlobjects.gml.model.geometry.AbstractGeometry;
@@ -75,7 +57,7 @@ import java.io.StringReader;
 import java.util.*;
 
 public class ModelSerializerHelper {
-    private final Logger logger = LoggerManager.getInstance().getLogger(ModelSerializerHelper.class);
+    private final Logger logger = LoggerFactory.getLogger(ModelSerializerHelper.class);
     private final GlobalFeatureWriter writer;
     private final PersistentMapStore store;
     private final CityGMLAdapterContext context;
@@ -110,7 +92,7 @@ public class ModelSerializerHelper {
         failFast = options.isFailFast();
         version = formatOptions.getVersion();
         versionHelper = CityGMLVersionHelper.of(version);
-        srsName = options.getSpatialReference().map(SpatialReference::getURI).orElse(null);
+        srsName = options.getSrsName().orElse(null);
         mapLod0RoofEdge = version == CityGMLVersion.v3_0 && formatOptions.isMapLod0RoofEdge();
         mapLod1MultiSurfaces = version == CityGMLVersion.v3_0 && formatOptions.isMapLod1MultiSurfaces();
         preprocessor.checkForDeprecatedLod4Geometry(version == CityGMLVersion.v3_0 && formatOptions.isUseLod4AsLod3());
@@ -157,7 +139,7 @@ public class ModelSerializerHelper {
 
     public void logOrThrow(Level level, String message, Throwable cause) throws ModelSerializeException {
         if (!failFast) {
-            logger.log(level, message, cause);
+            logger.atLevel(level).setCause(cause).log(message);
         } else {
             throw new ModelSerializeException(message, cause);
         }
@@ -223,9 +205,9 @@ public class ModelSerializerHelper {
         if (geometry != null) {
             String objectId = geometry.getObjectId().orElse(null);
             if (objectId != null) {
-                boolean isExported = getOrCreatePersistentMap("implicit-geometries")
+                boolean isWritten = getOrCreatePersistentMap("implicit-geometries")
                         .putIfAbsent(objectId, true) != null;
-                return !geometryIdCache.add(objectId) || isExported;
+                return !geometryIdCache.add(objectId) || isWritten;
             }
 
             return false;
@@ -234,8 +216,10 @@ public class ModelSerializerHelper {
         }
     }
 
-    public ExternalFile lookupExternalFile(String objectId) {
-        return objectId != null ? preprocessor.lookupExternalFile(objectId) : null;
+    public org.citydb.model.geometry.ImplicitGeometry getOrLookupObject(ImplicitGeometryProperty property) {
+        return property.getObject().orElseGet(() -> property.getReference()
+                .map(preprocessor::lookupImplicitGeometry)
+                .orElse(null));
     }
 
     public void writeAsGlobalFeature(AbstractFeature feature) {

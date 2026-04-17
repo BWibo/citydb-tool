@@ -1,35 +1,21 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.cli.exporter.citygml;
 
-import org.citydb.cli.command.Command;
+import org.citydb.cli.ExecutionException;
+import org.citydb.cli.common.Command;
+import org.citydb.cli.common.UpgradeOptions;
 import org.citydb.cli.exporter.ExportController;
-import org.citydb.cli.option.UpgradeOptions;
-import org.citydb.config.ConfigObject;
+import org.citydb.config.ConfigException;
+import org.citydb.config.common.ConfigObject;
 import org.citydb.io.IOAdapter;
 import org.citydb.io.IOAdapterManager;
 import org.citydb.io.citygml.CityGMLAdapter;
 import org.citydb.io.citygml.writer.CityGMLFormatOptions;
-import org.citydb.io.writer.option.OutputFormatOptions;
+import org.citydb.io.writer.options.OutputFormatOptions;
 import org.citygml4j.core.model.CityGMLVersion;
 import picocli.CommandLine;
 
@@ -45,7 +31,11 @@ public class CityGMLExportCommand extends ExportController {
             description = "Format and indent output file (default: ${DEFAULT-VALUE}).")
     private boolean prettyPrint;
 
-    @CommandLine.ArgGroup(exclusive = false,
+    @CommandLine.Option(names = {"-x", "--xsl-transform"}, split = ",", paramLabel = "<stylesheet>",
+            description = "Apply XSLT stylesheets to transform output.")
+    private String[] stylesheets;
+
+    @CommandLine.ArgGroup(exclusive = false, order = ARG_GROUP_ORDER,
             heading = "Upgrade options for CityGML 2.0 and 1.0:%n")
     private UpgradeOptions upgradeOptions;
 
@@ -58,20 +48,26 @@ public class CityGMLExportCommand extends ExportController {
     }
 
     @Override
-    protected OutputFormatOptions getFormatOptions(ConfigObject<OutputFormatOptions> formatOptions) {
-        CityGMLFormatOptions options = formatOptions.get(CityGMLFormatOptions.class);
-        if (options != null) {
-            if (Command.hasMatchedOption("--citygml-version", commandSpec)) {
-                options.setVersion(version);
-            }
+    protected OutputFormatOptions getFormatOptions(ConfigObject<OutputFormatOptions> formatOptions) throws ExecutionException {
+        CityGMLFormatOptions options;
+        try {
+            options = formatOptions.getOrElse(CityGMLFormatOptions.class, CityGMLFormatOptions::new);
+        } catch (ConfigException e) {
+            throw new ExecutionException("Failed to get CityGML format options from config.", e);
+        }
 
-            if (Command.hasMatchedOption("--no-pretty-print", commandSpec)) {
-                options.setPrettyPrint(prettyPrint);
+        if (Command.hasMatchedOption("--citygml-version", commandSpec)) {
+            options.setVersion(version);
+        }
+
+        if (Command.hasMatchedOption("--no-pretty-print", commandSpec)) {
+            options.setPrettyPrint(prettyPrint);
+        }
+
+        if (stylesheets != null) {
+            for (String stylesheet : stylesheets) {
+                options.addXslTransform(helper.resolveAgainstWorkingDir(stylesheet));
             }
-        } else {
-            options = new CityGMLFormatOptions()
-                    .setVersion(version)
-                    .setPrettyPrint(prettyPrint);
         }
 
         if (upgradeOptions != null) {

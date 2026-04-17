@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io;
@@ -27,7 +11,6 @@ import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.mime.MediaType;
-import org.citydb.core.CoreConstants;
 import org.citydb.core.file.InputFile;
 import org.citydb.core.file.input.GZipInputFile;
 import org.citydb.core.file.input.RegularInputFile;
@@ -52,6 +35,7 @@ public class InputFiles {
     private final TikaConfig tikaConfig;
     private final Set<String> extensions = new HashSet<>();
     private final Set<MediaType> mediaTypes = new HashSet<>();
+    private Path baseDirectory = Path.of(".").toAbsolutePath().normalize();
     private Predicate<Path> filter;
 
     private InputFiles(Collection<String> pathsOrGlobPatterns) throws IOException {
@@ -105,6 +89,14 @@ public class InputFiles {
         return this;
     }
 
+    public InputFiles withBaseDirectory(Path baseDirectory) {
+        if (baseDirectory != null) {
+            this.baseDirectory = baseDirectory;
+        }
+
+        return this;
+    }
+
     public InputFiles withFilter(Predicate<Path> filter) {
         this.filter = filter;
         return this;
@@ -125,7 +117,7 @@ public class InputFiles {
             } else {
                 // construct a pattern from the path and the truncated elements
                 String pattern = !elements.isEmpty() ?
-                        ("glob:" + path.normalize().toAbsolutePath() + File.separator +
+                        ("glob:" + path.toAbsolutePath().normalize() + File.separator +
                                 String.join(File.separator, elements)).replace("\\", "\\\\") :
                         defaultPattern;
 
@@ -133,7 +125,7 @@ public class InputFiles {
                 PathMatcher matcher = FileSystems.getDefault().getPathMatcher(pattern);
                 try (Stream<Path> stream = Files.walk(path, FileVisitOption.FOLLOW_LINKS)) {
                     stream.filter(Files::isRegularFile)
-                            .filter(p -> matcher.matches(p.normalize().toAbsolutePath()))
+                            .filter(p -> matcher.matches(p.toAbsolutePath().normalize()))
                             .filter(p -> filter == null || filter.test(p))
                             .forEach(p -> detect(p, inputFiles, defaultPattern, false));
                 }
@@ -173,10 +165,10 @@ public class InputFiles {
             }
         } while (path == null && !file.isEmpty());
 
-        // resolve path against the working directory
+        // resolve path against the base directory
         path = path == null ?
-                CoreConstants.WORKING_DIR :
-                CoreConstants.WORKING_DIR.resolve(path);
+                baseDirectory :
+                baseDirectory.resolve(path);
 
         elements.addFirst(path.toAbsolutePath().toString());
         return elements;
@@ -199,7 +191,7 @@ public class InputFiles {
              Stream<Path> stream = Files.walk(fileSystem.getPath("/"))) {
             PathMatcher matcher = fileSystem.getPathMatcher(pattern);
             stream.filter(Files::isRegularFile)
-                    .filter(p -> matcher.matches(p.normalize().toAbsolutePath()))
+                    .filter(p -> matcher.matches(p.toAbsolutePath().normalize()))
                     .filter(p -> filter == null || filter.test(p))
                     .forEach(p -> {
                         MediaType mediaType = getMediaType(p);

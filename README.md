@@ -1,8 +1,10 @@
-![Gradle build](https://img.shields.io/github/actions/workflow/status/3dcitydb/citydb-tool/build-citydb-tool.yml?logo=Gradle&logoColor=white&style=flat-square) [![Docker edge image build](https://img.shields.io/github/actions/workflow/status/3dcitydb/citydb-tool/docker-build-push-edge.yml?label=edge&logo=docker&style=flat-square)](https://github.com/users/3dcitydb/packages/container/package/citydb-tool)
+![Gradle build](https://img.shields.io/github/actions/workflow/status/3dcitydb/citydb-tool/build-citydb-tool.yml?logo=Gradle&logoColor=white&style=flat-square)
+[![Docker edge image build](https://img.shields.io/github/actions/workflow/status/3dcitydb/citydb-tool/docker-build-push-edge.yml?label=edge&logo=docker&logoColor=white&style=flat-square)](https://github.com/users/3dcitydb/packages/container/package/citydb-tool)
+![release](https://img.shields.io/github/v/release/3dcitydb/citydb-tool?display_name=tag&style=flat-square)
 
 # citydb-tool
 
-3D City Database 5.0 CLI to import/export city model data and to run database operations.
+3D City Database v5 CLI to import/export city model data and to run database operations.
 
 ## License
 
@@ -11,7 +13,7 @@ See the `LICENSE` file for more details.
 
 ## Latest release
 
-The latest stable release of the citydb-tool is `0.7.1-beta`.
+The latest stable release of citydb-tool is `1.3.0`.
 
 Download the latest citydb-tool release as ZIP package
 [here](https://github.com/3dcitydb/citydb-tool/releases/latest). Previous releases are available from the
@@ -36,22 +38,29 @@ To show the help message and all available commands of the citydb-tool, simply t
 This will print the following usage information:
 
 ```
-Usage: citydb [-hV] [-L=<level>] [--log-file=<file>] [--pid-file=<file>]
-              [@<filename>...] COMMAND
+Usage: citydb [OPTIONS] COMMAND
 Command-line interface for the 3D City Database.
-      [@<filename>...]      One or more argument files containing options.
-  -L, --log-level=<level>   Log level: fatal, error, warn, info, debug, trace
-                              (default: info).
-      --log-file=<file>     Write log messages to this file.
-      --pid-file=<file>     Create a file containing the process ID.
-  -h, --help                Show this help message and exit.
-  -V, --version             Print version information and exit.
+      [@<filename>...]       One or more argument files containing options.
+      --config-file=<file>   Load configuration from this file.
+  -L, --log-level=<level>    Log level: fatal, error, warn, info, debug, trace
+                               (default: info).
+      --log-file=<file>      Write log messages to this file.
+      --quiet                Disable console log messages.
+      --pid-file=<file>      Create a file containing the process ID.
+      --plugins=<dir>        Load plugins from this directory.
+      --use-plugin=<plugin[=true|false]>[,<plugin[=true|false]>...]
+                             Enable or disable plugins with a matching fully
+                               qualified class name (default: true).
+  -h, --help                 Show this help message and exit.
+  -V, --version              Print version information and exit.
 Commands:
-  help    Display help information about the specified command.
-  import  Import data in a supported format.
-  export  Export data in a supported format.
-  delete  Delete features from the database.
-  index   Perform index operations on the database.
+  help     Display help information about the specified command.
+  connect  Test connection to the database.
+  info     Show database contents and summary information.
+  import   Import data in a supported format.
+  export   Export data in a supported format.
+  delete   Delete features from the database.
+  index    Perform index operations.
 ```
 
 To get help about a specific command of the citydb-tool, enter the following and replace `COMMAND` with the name of
@@ -67,16 +76,18 @@ The citydb-tool can be run on any platform providing appropriate Java support.
 
 ## Docker
 
-Currently, we offer an `edge` Docker image of the tool, which is built from the latest commit to the `main` branch.
-The image supports the most common architectures (`amd64`, `arm64`) and is available from Dockerhub or GitHub packages.
+citydb-tool is available as Docker image. You can either build your own image using the provided Dockerfile
+or use a pre-built image from [Dockerhub](https://hub.docker.com/r/3dcitydb/citydb-tool) or
+[GitHub packages](https://github.com/3dcitydb/citydb-tool/pkgs/container/citydb-tool). The pre-built image supports
+common architectures (`amd64`, `arm64`) can can be pulled with:
 
-    docker pull 3dcitydb/citydb-tool:edge
-    docker pull ghcr.io/3dcitydb/citydb-tool:edge
+    docker pull 3dcitydb/citydb-tool
+    docker pull ghcr.io/3dcitydb/citydb-tool
 
 ### Synopsis
 
 The Docker image exposes the commands of the `citydb-tool`, as described
-in the [usage section](https://github.com/3dcitydb/citydb-tool#usage).
+in the [usage section](https://github.com/3dcitydb/citydb-tool#using).
 The environment variables listed below can be used to specify a 3DCityDB v5 connection. To exchange data with the
 container, mount a host folder to `/data` inside the container.
 
@@ -87,6 +98,7 @@ container, mount a host folder to `/data` inside the container.
         [-e CITYDB_SCHEMA=theCityDBSchemaName] \
         [-e CITYDB_USERNAME=theUsername] \
         [-e CITYDB_PASSWORD=theSecretPass] \
+        [-e CITYDB_CONN_PROPS=connProperties] \
         [-v /my/data/:/data] \
     3dcitydb/citydb-tool[:TAG] COMMAND
 

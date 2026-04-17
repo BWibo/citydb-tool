@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.adapter.geometry.serializer;
@@ -24,7 +8,6 @@ package org.citydb.io.citygml.adapter.geometry.serializer;
 
 import org.citydb.io.citygml.writer.ModelSerializerHelper;
 import org.citydb.model.common.ExternalFile;
-import org.citydb.model.common.Reference;
 import org.citydb.model.geometry.*;
 import org.citydb.model.property.ImplicitGeometryProperty;
 import org.citygml4j.core.model.core.ImplicitGeometry;
@@ -39,13 +22,13 @@ import org.xmlobjects.gml.model.geometry.aggregates.MultiSolid;
 import org.xmlobjects.gml.model.geometry.aggregates.MultiSurface;
 import org.xmlobjects.gml.model.geometry.complexes.CompositeSolid;
 import org.xmlobjects.gml.model.geometry.complexes.CompositeSurface;
+import org.xmlobjects.gml.model.geometry.primitives.*;
 import org.xmlobjects.gml.model.geometry.primitives.LineString;
 import org.xmlobjects.gml.model.geometry.primitives.LinearRing;
 import org.xmlobjects.gml.model.geometry.primitives.Point;
 import org.xmlobjects.gml.model.geometry.primitives.Polygon;
 import org.xmlobjects.gml.model.geometry.primitives.Solid;
 import org.xmlobjects.gml.model.geometry.primitives.TriangulatedSurface;
-import org.xmlobjects.gml.model.geometry.primitives.*;
 
 import java.util.List;
 
@@ -257,9 +240,9 @@ public class GeometryHelper {
 
     public ImplicitGeometry getImplicitGeometry(ImplicitGeometryProperty source, boolean force3D) {
         if (source != null) {
-            ImplicitGeometry target = new ImplicitGeometry();
-            org.citydb.model.geometry.ImplicitGeometry implicitGeometry = source.getObject().orElse(null);
+            org.citydb.model.geometry.ImplicitGeometry implicitGeometry = helper.getOrLookupObject(source);
             if (implicitGeometry != null) {
+                ImplicitGeometry target = new ImplicitGeometry();
                 Geometry<?> geometry = implicitGeometry.getGeometry().orElse(null);
                 if (geometry != null) {
                     target.setRelativeGeometry(helper.lookupAndPut(implicitGeometry) ?
@@ -270,13 +253,9 @@ public class GeometryHelper {
                             .map(ExternalFile::getFileLocation)
                             .orElse(null));
                 }
-            } else {
-                source.getReference()
-                        .map(Reference::getTarget)
-                        .ifPresent(reference -> target.setRelativeGeometry(new GeometryProperty<>("#" + reference)));
-            }
 
-            return target;
+                return target;
+            }
         }
 
         return null;

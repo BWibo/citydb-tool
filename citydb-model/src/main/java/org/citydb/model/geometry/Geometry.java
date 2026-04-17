@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.model.geometry;
@@ -29,14 +13,16 @@ import org.citydb.model.walker.ModelWalker;
 
 import java.util.Optional;
 
-public abstract class Geometry<T extends Geometry<?>> extends Child implements Referencable, Visitable, SRSReference, Describable<GeometryDescriptor> {
+public abstract class Geometry<T extends Geometry<?>> extends Child implements SpatialObject, Referencable, Visitable, Describable<GeometryDescriptor> {
     private String objectId;
     private Integer srid;
-    private String srsName;
+    private String srsIdentifier;
     private GeometryDescriptor descriptor;
 
-    public abstract int getVertexDimension();
+    public abstract T copy();
+
     public abstract GeometryType getGeometryType();
+
     abstract T self();
 
     @Override
@@ -53,7 +39,7 @@ public abstract class Geometry<T extends Geometry<?>> extends Child implements R
     @Override
     public Optional<Integer> getSRID() {
         if (srid == null) {
-            SRSReference parent = getInheritedSRSReference();
+            SrsReference parent = getInheritedSrsReference();
             if (parent != null) {
                 return parent.getSRID();
             }
@@ -69,20 +55,20 @@ public abstract class Geometry<T extends Geometry<?>> extends Child implements R
     }
 
     @Override
-    public Optional<String> getSrsName() {
-        if (srsName == null) {
-            SRSReference parent = getInheritedSRSReference();
+    public Optional<String> getSrsIdentifier() {
+        if (srsIdentifier == null) {
+            SrsReference parent = getInheritedSrsReference();
             if (parent != null) {
-                return parent.getSrsName();
+                return parent.getSrsIdentifier();
             }
         }
 
-        return Optional.ofNullable(srsName);
+        return Optional.ofNullable(srsIdentifier);
     }
 
     @Override
-    public T setSrsName(String srsName) {
-        this.srsName = srsName;
+    public T setSrsIdentifier(String srsIdentifier) {
+        this.srsIdentifier = srsIdentifier;
         return self();
     }
 
@@ -98,8 +84,8 @@ public abstract class Geometry<T extends Geometry<?>> extends Child implements R
     }
 
     public Geometry<?> getRootGeometry() {
-        Geometry<?> root = this, parent = this;
-        while ((parent = parent.getParent(Geometry.class)) != null) {
+        Geometry<?> root = this;
+        while (root.getParent().orElse(null) instanceof Geometry<?> parent) {
             root = parent;
         }
 
@@ -168,6 +154,15 @@ public abstract class Geometry<T extends Geometry<?>> extends Child implements R
 
         return envelope
                 .setSRID(srid)
-                .setSrsName(srsName);
+                .setSrsIdentifier(srsIdentifier);
+    }
+
+    T copyPropertiesFrom(Geometry<T> other) {
+        objectId = other.objectId;
+        srid = other.srid;
+        srsIdentifier = other.srsIdentifier;
+        descriptor = other.descriptor;
+
+        return self();
     }
 }

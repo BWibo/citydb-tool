@@ -1,42 +1,27 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.reader;
 
-import org.apache.logging.log4j.Logger;
+import org.citydb.config.ConfigException;
 import org.citydb.core.cache.PersistentMapStore;
 import org.citydb.core.concurrent.CountLatch;
 import org.citydb.core.concurrent.ExecutorHelper;
 import org.citydb.core.file.InputFile;
 import org.citydb.io.citygml.CityGMLAdapterContext;
+import org.citydb.io.citygml.reader.preprocess.CityJSONPreprocessor;
 import org.citydb.io.citygml.reader.util.FileMetadata;
 import org.citydb.io.reader.FeatureReader;
 import org.citydb.io.reader.ReadException;
 import org.citydb.io.reader.ReadOptions;
-import org.citydb.logging.LoggerManager;
+import org.citydb.io.reader.filter.Filter;
 import org.citydb.model.feature.Feature;
 import org.citygml4j.cityjson.CityJSONContext;
 import org.citygml4j.core.model.core.AbstractFeature;
-import org.citygml4j.core.util.reference.DefaultReferenceResolver;
-import org.xmlobjects.gml.util.reference.ReferenceResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -44,71 +29,76 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 
 public class CityJSONReader implements FeatureReader {
-    private final Logger logger = LoggerManager.getInstance().getLogger(CityJSONReader.class);
+    private final Logger logger = LoggerFactory.getLogger(CityJSONReader.class);
+    private final InputFile file;
+    private final ReadOptions options;
     private final CityGMLAdapterContext adapterContext;
-    private final CityJSONContext cityJSONContext;
+    private final CityJSONReaderFactory factory;
+    private final CityJSONFormatOptions formatOptions;
+    private final PersistentMapStore store;
+    private final Filter filter;
+    private final CityJSONPreprocessor preprocessor = new CityJSONPreprocessor();
 
-    private InputFile file;
-    private ReadOptions options;
-    private CityJSONReaderFactory factory;
-    private PersistentMapStore store;
+    private volatile boolean shouldRun = true;
     private Throwable exception;
 
-    private volatile boolean isInitialized;
-    private volatile boolean shouldRun;
-
-    public CityJSONReader(CityGMLAdapterContext adapterContext, CityJSONContext cityJSONContext) {
-        this.adapterContext = Objects.requireNonNull(adapterContext, "CityGML adapter context must not be null.");
-        this.cityJSONContext = Objects.requireNonNull(cityJSONContext, "CityJSON context must not be null.");
-    }
-
-    @Override
-    public void initialize(InputFile file, ReadOptions options) throws ReadException {
+    public CityJSONReader(InputFile file, ReadOptions options, CityGMLAdapterContext adapterContext, CityJSONContext cityJSONContext) throws ReadException {
         this.file = Objects.requireNonNull(file, "The input file must not be null.");
-        this.options = Objects.requireNonNull(options, "The reader options must not be null.");
+        this.options = Objects.requireNonNull(options, "The read options must not be null.");
+        this.adapterContext = Objects.requireNonNull(adapterContext, "CityGML adapter context must not be null.");
+        Objects.requireNonNull(cityJSONContext, "CityJSON context must not be null.");
 
         try {
-            store = PersistentMapStore.newInstance();
-            logger.debug("Initialized local cache at " + store.getBackingFile() + ".");
+            formatOptions = options.getFormatOptions()
+                    .getOrElse(CityJSONFormatOptions.class, CityJSONFormatOptions::new);
+        } catch (ConfigException e) {
+            throw new ReadException("Failed to get CityJSON format options from config.", e);
+        }
+
+        try {
+            store = PersistentMapStore.builder()
+                    .tempDirectory(options.getTempDirectory().orElse(null))
+                    .build();
+            logger.debug("Initialized CityJSON reader cache at {}.", store.getBackingFile());
         } catch (IOException e) {
             throw new ReadException("Failed to initialize local cache.", e);
         }
 
-        factory = CityJSONReaderFactory.newInstance(cityJSONContext)
-                .setReadOptions(options)
-                .setFormatOptions(options.getFormatOptions().get(CityJSONFormatOptions.class));
-
-        isInitialized = true;
-        shouldRun = true;
+        factory = CityJSONReaderFactory.newInstance(cityJSONContext, options, formatOptions);
+        filter = options.getFilter().orElseGet(Filter::acceptAll);
     }
 
     @Override
     public void read(Consumer<Feature> consumer) throws ReadException {
-        if (!isInitialized) {
-            throw new ReadException("Illegal to read data when reader has not been initialized.");
-        }
-
-        ExecutorService service = ExecutorHelper.newFixedAndBlockingThreadPool(options.getNumberOfThreads() > 0 ?
-                options.getNumberOfThreads() :
-                Math.max(2, Runtime.getRuntime().availableProcessors()));
+        shouldRun = true;
+        int threads = filter.needsSequentialProcessing() ? 1 :
+                options.getNumberOfThreads() > 0 ?
+                        options.getNumberOfThreads() :
+                        Math.max(2, Runtime.getRuntime().availableProcessors());
+        ExecutorService service = ExecutorHelper.newFixedAndBlockingThreadPool(threads);
         CountLatch countLatch = new CountLatch();
 
         try (org.citygml4j.cityjson.reader.CityJSONReader reader = factory.createReader(file)) {
             FileMetadata metadata = FileMetadata.of(reader);
-            ReferenceResolver referenceResolver = DefaultReferenceResolver.newInstance();
             ThreadLocal<ModelBuilderHelper> helpers = ThreadLocal.withInitial(() ->
-                    new ModelBuilderHelper(file, store, adapterContext).initialize(metadata, options));
+                    new ModelBuilderHelper(file, store, adapterContext).initialize(metadata, options, formatOptions));
 
             while (shouldRun && reader.hasNext()) {
                 AbstractFeature feature = reader.next();
+                preprocessor.processGlobalObjects(feature);
 
                 countLatch.increment();
                 service.execute(() -> {
                     try {
-                        referenceResolver.resolveReferences(feature);
+                        preprocessor.process(feature);
                         Feature object = helpers.get().getTopLevelFeature(feature);
                         if (object != null) {
-                            consumer.accept(object);
+                            Filter.Result result = filter.test(object);
+                            if (result == Filter.Result.ACCEPT) {
+                                consumer.accept(object);
+                            } else if (result == Filter.Result.STOP) {
+                                shouldRun = false;
+                            }
                         }
                     } catch (Throwable e) {
                         shouldRun = false;
@@ -137,10 +127,7 @@ public class CityJSONReader implements FeatureReader {
 
     @Override
     public void close() {
-        if (isInitialized) {
-            store.close();
-            exception = null;
-            isInitialized = false;
-        }
+        store.close();
+        exception = null;
     }
 }

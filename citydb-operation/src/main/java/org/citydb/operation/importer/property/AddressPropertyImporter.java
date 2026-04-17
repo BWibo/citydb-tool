@@ -1,30 +1,12 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.importer.property;
 
 import org.citydb.database.schema.Sequence;
 import org.citydb.model.address.Address;
-import org.citydb.model.common.Reference;
-import org.citydb.model.common.RelationType;
 import org.citydb.model.property.AddressProperty;
 import org.citydb.model.property.PropertyDescriptor;
 import org.citydb.operation.importer.ImportException;
@@ -46,9 +28,8 @@ public class AddressPropertyImporter extends PropertyImporter {
     protected String getInsertStatement() {
         return "insert into " + tableHelper.getPrefixedTableName(table) +
                 "(id, feature_id, parent_id, datatype_id, namespace_id, name, " +
-                "val_address_id, val_relation_type) " +
-                "values (" + String.join(",", Collections.nCopies(7, "?")) + ", " +
-                RelationType.CONTAINS.getDatabaseValue() + ")";
+                "val_address_id) " +
+                "values (" + String.join(",", Collections.nCopies(7, "?")) + ")";
     }
 
     public PropertyDescriptor doImport(AddressProperty property, long featureId) throws ImportException, SQLException {
@@ -62,12 +43,15 @@ public class AddressPropertyImporter extends PropertyImporter {
 
     PropertyDescriptor doImport(AddressProperty property, long propertyId, long parentId, long featureId) throws ImportException, SQLException {
         Address address = property.getObject().orElse(null);
-        if (address != null) {
+        if (address != null && canImport(address)) {
             stmt.setLong(7, tableHelper.getOrCreateImporter(AddressImporter.class)
                     .doImport(address)
                     .getId());
-        } else if (property.getReference().isPresent()) {
-            Reference reference = property.getReference().get();
+        } else {
+            String reference = address != null ?
+                    address.getOrCreateObjectId() :
+                    property.getReference().orElseThrow(() -> new ImportException("The address property " +
+                            "contains neither an object nor a reference."));
             cacheReference(CacheType.ADDRESS, reference, propertyId);
             stmt.setNull(7, Types.BIGINT);
         }

@@ -1,115 +1,178 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.cli.util;
 
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
+import org.citydb.cli.CliConstants;
 import org.citydb.cli.ExecutionException;
-import org.citydb.cli.option.ConnectionOptions;
+import org.citydb.cli.common.ConnectionOptions;
+import org.citydb.cli.logging.LoggerManager;
 import org.citydb.config.Config;
+import org.citydb.config.ConfigException;
+import org.citydb.core.concurrent.LazyCheckedInitializer;
 import org.citydb.database.DatabaseException;
 import org.citydb.database.DatabaseManager;
 import org.citydb.database.DatabaseOptions;
 import org.citydb.database.adapter.DatabaseAdapter;
+import org.citydb.database.adapter.DatabaseAdapterException;
+import org.citydb.database.adapter.DatabaseAdapterManager;
 import org.citydb.database.connection.ConnectionDetails;
+import org.citydb.database.postgres.PostgresqlAdapter;
 import org.citydb.database.schema.Index;
-import org.citydb.database.schema.IndexHelper;
+import org.citydb.database.schema.ValidityReference;
+import org.citydb.database.util.IndexHelper;
 import org.citydb.io.IOAdapterException;
 import org.citydb.io.IOAdapterManager;
-import org.citydb.logging.LoggerManager;
+import org.citydb.operation.exporter.options.ValidityOptions;
 import org.citydb.plugin.PluginManager;
+import org.citydb.query.Query;
+import org.citydb.query.QueryHelper;
+import org.citydb.query.builder.QueryBuildException;
+import org.citydb.query.builder.sql.SqlBuildOptions;
+import org.citydb.query.executor.QueryExecutor;
+import org.citydb.query.filter.Filter;
+import org.citydb.query.filter.operation.BooleanExpression;
+import org.citydb.query.filter.operation.Operators;
+import org.citydb.sqlbuilder.common.SqlObject;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.Collection;
-import java.util.List;
 import java.util.function.Consumer;
 
 public class CommandHelper {
+    private static final CommandHelper instance = new CommandHelper();
     private final Logger logger = LoggerManager.getInstance().getLogger(CommandHelper.class);
-    private final PluginManager pluginManager = PluginManager.getInstance();
+    private final DatabaseManager databaseManager = DatabaseManager.newInstance();
+    private final LazyCheckedInitializer<DatabaseAdapterManager, ExecutionException> databaseAdapterManager =
+            LazyCheckedInitializer.of(this::createDatabaseAdapterManager);
+    private final LazyCheckedInitializer<IOAdapterManager, ExecutionException> ioAdapterManager =
+            LazyCheckedInitializer.of(this::createIOAdapterManager);
 
     private CommandHelper() {
     }
 
-    public static CommandHelper newInstance() {
-        return new CommandHelper();
+    public static CommandHelper getInstance() {
+        return instance;
     }
 
-    public DatabaseManager connect(ConnectionOptions options, Config config) throws ExecutionException {
-        ConnectionDetails connectionDetails = options != null ?
-                options.toConnectionDetails() :
-                new ConnectionDetails();
+    public DatabaseManager getDatabaseManager() {
+        return databaseManager;
+    }
 
-        DatabaseOptions databaseOptions = config.get(DatabaseOptions.class);
-        if (databaseOptions != null) {
-            databaseOptions.getDefaultConnection().ifPresent(defaults -> connectionDetails
-                    .setHost(connectionDetails.getHost(defaults.getHost()))
-                    .setPort(connectionDetails.getPort(defaults.getPort()))
-                    .setDatabase(connectionDetails.getDatabase(defaults.getDatabase()))
-                    .setSchema(connectionDetails.getSchema(defaults.getSchema()))
-                    .setUser(connectionDetails.getUser(defaults.getUser()))
-                    .setPassword(connectionDetails.getPassword(defaults.getPassword()))
-                    .setPoolOptions(defaults.getPoolOptions().orElse(null)));
-        }
-
-        return connect(connectionDetails);
+    public DatabaseAdapterManager getDatabaseAdapterManager() throws ExecutionException {
+        return databaseAdapterManager.get();
     }
 
     public DatabaseManager connect(ConnectionOptions options) throws ExecutionException {
-        return connect(options != null ? options.toConnectionDetails() : new ConnectionDetails());
+        return connect(options, null);
+    }
+
+    public DatabaseManager connect(ConnectionOptions options, Config config) throws ExecutionException {
+        ConnectionDetails connectionDetails = getConnectionDetails(options, config);
+        return connect(connectionDetails);
     }
 
     public DatabaseManager connect(ConnectionDetails connectionDetails) throws ExecutionException {
         try {
-            logger.info("Connecting to database " + connectionDetails.toConnectString() + ".");
-            DatabaseManager databaseManager = DatabaseManager.newInstance();
-            databaseManager.connect(connectionDetails);
-            databaseManager.logDatabaseMetadata(Level.INFO);
+            logger.info("Connecting to database {}.", connectionDetails.toConnectString());
+            databaseManager.connect(connectionDetails, databaseAdapterManager.get());
+            databaseManager.reportDatabaseInfo(logger::info);
             return databaseManager;
         } catch (DatabaseException | SQLException e) {
             throw new ExecutionException("Failed to connect to the database.", e);
         }
     }
 
-    public IOAdapterManager createIOAdapterManager() throws ExecutionException {
-        IOAdapterManager manager = IOAdapterManager.newInstance().load(pluginManager.getClassLoader());
-        if (manager.hasExceptions()) {
-            throw new ExecutionException("Failed to initialize IO adapter manager.",
-                    manager.getExceptions().values().stream()
-                            .flatMap(Collection::stream)
-                            .findFirst().orElse(new IOAdapterException()));
+    public void disconnect() {
+        if (databaseManager.isConnected()) {
+            databaseManager.disconnect();
+        }
+    }
+
+    public ConnectionDetails getConnectionDetails(ConnectionOptions options) throws ExecutionException {
+        return getConnectionDetails(options, null);
+    }
+
+    public ConnectionDetails getConnectionDetails(ConnectionOptions options, Config config) throws ExecutionException {
+        ConnectionDetails connectionDetails = options != null ?
+                options.toConnectionDetails() :
+                new ConnectionDetails();
+
+        if (config != null) {
+            try {
+                config.ifPresent(DatabaseOptions.class, databaseOptions ->
+                        databaseOptions.getDefaultConnection().ifPresent(connectionDetails::fillAbsentValuesFrom));
+            } catch (ConfigException e) {
+                throw new ExecutionException("Failed to get database options from config.", e);
+            }
         }
 
-        return manager;
+        return connectionDetails.fillAbsentValuesFromEnv()
+                .setDatabaseNameIfAbsent(PostgresqlAdapter.DATABASE_NAME);
+    }
+
+    public IOAdapterManager getIOAdapterManager() throws ExecutionException {
+        return ioAdapterManager.get();
+    }
+
+    public QueryExecutor getQueryExecutor(Query query, SqlBuildOptions options, DatabaseAdapter adapter) throws ExecutionException {
+        return getQueryExecutor(query, options, null, adapter);
+    }
+
+    public QueryExecutor getQueryExecutor(Query query, SqlBuildOptions options, Path tempDirectory, DatabaseAdapter adapter) throws ExecutionException {
+        try {
+            return QueryExecutor.builder(adapter)
+                    .tempDirectory(tempDirectory)
+                    .build(query, options);
+        } catch (QueryBuildException e) {
+            throw new ExecutionException("Failed to build database query.", e);
+        } catch (IOException e) {
+            throw new ExecutionException("Failed to build database query executor.", e);
+        }
+    }
+
+    public Query setValidityFilter(Query query, ValidityOptions validityOptions) {
+        BooleanExpression validity;
+        if (validityOptions != null) {
+            validity = switch (validityOptions.getMode()) {
+                case VALID -> validityOptions.getAt()
+                        .map(at -> QueryHelper.validAt(at, validityOptions.getReference(), validityOptions.isLenient()))
+                        .orElseGet(() -> QueryHelper.isValid(validityOptions.getReference()));
+                case INVALID -> validityOptions.getAt()
+                        .map(at -> QueryHelper.invalidAt(at, validityOptions.getReference()))
+                        .orElseGet(() -> QueryHelper.isInvalid(validityOptions.getReference()));
+                case ALL -> null;
+            };
+        } else {
+            validity = QueryHelper.isValid(ValidityReference.DATABASE);
+        }
+
+        return validity != null ?
+                query.setFilter(query.getFilter()
+                        .map(filter -> Filter.of(Operators.and(validity, filter.getExpression())))
+                        .orElseGet(() -> Filter.of(validity))) :
+                query;
+    }
+
+    public String getFormattedSql(SqlObject object, DatabaseAdapter adapter) {
+        return adapter.getSchemaAdapter().getSqlHelper().toSql(object, org.citydb.sqlbuilder.SqlBuildOptions.defaults()
+                .setKeywordCase(org.citydb.sqlbuilder.SqlBuildOptions.KeywordCase.UPPERCASE)
+                .setIndent("  "));
     }
 
     public void createIndexes(DatabaseAdapter adapter) throws ExecutionException {
         try {
             IndexHelper indexHelper = adapter.getSchemaAdapter().getIndexHelper();
-            List<Index> indexes = IndexHelper.DEFAULT_INDEXES;
-            for (int i = 0; i < indexes.size(); i++) {
-                Index index = indexes.get(i);
-                logger.debug("Creating database index " + (i + 1) + " of " + indexes.size() + " on " + index + ".");
-                indexHelper.create(index);
+            int i = 1, size = IndexHelper.DEFAULT_INDEXES.size();
+            for (Index index : IndexHelper.DEFAULT_INDEXES) {
+                logger.debug("Creating database index {} of {} on {}.", i++, size, index);
+                indexHelper.create(index, IndexHelper.DEFAULT_PARTIAL_INDEXES.contains(index));
             }
         } catch (SQLException e) {
             throw new ExecutionException("Failed to create database indexes.", e);
@@ -119,10 +182,9 @@ public class CommandHelper {
     public void dropIndexes(DatabaseAdapter adapter) throws ExecutionException {
         try {
             IndexHelper indexHelper = adapter.getSchemaAdapter().getIndexHelper();
-            List<Index> indexes = IndexHelper.DEFAULT_INDEXES;
-            for (int i = 0; i < indexes.size(); i++) {
-                Index index = indexes.get(i);
-                logger.debug("Dropping database index " + (i + 1) + " of " + indexes.size() + " on " + index + ".");
+            int i = 1, size = IndexHelper.DEFAULT_INDEXES.size();
+            for (Index index : IndexHelper.DEFAULT_INDEXES) {
+                logger.debug("Dropping database index {} of {} on {}.", i++, size, index);
                 indexHelper.drop(index);
             }
         } catch (SQLException e) {
@@ -130,22 +192,43 @@ public class CommandHelper {
         }
     }
 
-    public void logIndexStatus(Level level, DatabaseAdapter adapter) throws ExecutionException {
-        printIndexStatus(adapter, s -> logger.log(level, s));
-    }
-
-    public void printIndexStatus(DatabaseAdapter adapter, Consumer<String> consumer) throws ExecutionException {
+    public IndexHelper.Status getIndexStatus(DatabaseAdapter adapter) throws ExecutionException {
         try {
-            String status = switch (adapter.getSchemaAdapter().getIndexHelper().existAll(IndexHelper.DEFAULT_INDEXES)) {
-                case ON -> "on";
-                case PARTIALLY_ON -> "partially on";
-                default -> "off";
-            };
-
-            consumer.accept("Database indexes are " + status + ".");
+            return adapter.getSchemaAdapter().getIndexHelper().existAll(IndexHelper.DEFAULT_INDEXES);
         } catch (SQLException e) {
             throw new ExecutionException("Failed to query status of database indexes.", e);
         }
+    }
+
+    public void logIndexStatus(Level level, DatabaseAdapter adapter) throws ExecutionException {
+        printIndexStatus(adapter, message -> logger.log(level, message));
+    }
+
+    public void logIndexStatus(Level level, IndexHelper.Status status) {
+        printIndexStatus(status, message -> logger.log(level, message));
+    }
+
+    public void printIndexStatus(DatabaseAdapter adapter, Consumer<String> consumer) throws ExecutionException {
+        printIndexStatus(getIndexStatus(adapter), consumer);
+    }
+
+    public void printIndexStatus(IndexHelper.Status status, Consumer<String> consumer) {
+        if (status != null) {
+            consumer.accept("Database indexes are " +
+                    switch (status) {
+                        case ON -> "on";
+                        case PARTIALLY_ON -> "partially on";
+                        default -> "off";
+                    } + ".");
+        }
+    }
+
+    public Path resolveAgainstWorkingDir(String path) {
+        return path != null ? resolveAgainstWorkingDir(Path.of(path)) : null;
+    }
+
+    public Path resolveAgainstWorkingDir(Path path) {
+        return path != null ? CliConstants.WORKING_DIR.resolve(path).normalize() : null;
     }
 
     public synchronized void logException(String message, Throwable e) {
@@ -153,7 +236,12 @@ public class CommandHelper {
         Level level = LoggerManager.getInstance().logConsole().getLogLevel();
         if (level.isMoreSpecificThan(Level.INFO)) {
             while (e != null) {
-                logger.error(e);
+                String cause = logger.getMessageFactory().newMessage(e).getFormattedMessage();
+                if (!cause.equals(message)) {
+                    logger.error(e);
+                }
+
+                message = cause;
                 e = e.getCause();
             }
         }
@@ -168,5 +256,25 @@ public class CommandHelper {
         } else {
             logException("An unexpected " + e.getClass().getName() + " error has occurred during execution.", e);
         }
+    }
+
+    private DatabaseAdapterManager createDatabaseAdapterManager() throws ExecutionException {
+        try {
+            return DatabaseAdapterManager.newInstance().load(PluginManager.getInstance().getClassLoader());
+        } catch (DatabaseAdapterException e) {
+            throw new ExecutionException("Failed to load database adapters.", e);
+        }
+    }
+
+    private IOAdapterManager createIOAdapterManager() throws ExecutionException {
+        IOAdapterManager manager = IOAdapterManager.newInstance().load(PluginManager.getInstance().getClassLoader());
+        if (manager.hasExceptions()) {
+            throw new ExecutionException("Failed to load IO adapters.",
+                    manager.getExceptions().values().stream()
+                            .flatMap(Collection::stream)
+                            .findFirst().orElse(new IOAdapterException()));
+        }
+
+        return manager;
     }
 }

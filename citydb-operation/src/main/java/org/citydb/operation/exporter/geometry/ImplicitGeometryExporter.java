@@ -1,27 +1,10 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.exporter.geometry;
 
-import org.citydb.database.schema.Table;
 import org.citydb.model.appearance.Appearance;
 import org.citydb.model.appearance.AppearanceDescriptor;
 import org.citydb.model.common.ExternalFile;
@@ -37,10 +20,12 @@ import org.citydb.operation.exporter.appearance.AppearanceExporter;
 import org.citydb.operation.exporter.common.BlobExporter;
 import org.citydb.operation.exporter.common.DatabaseExporter;
 import org.citydb.operation.exporter.util.ExternalFileHelper;
+import org.citydb.sqlbuilder.literal.Placeholder;
+import org.citydb.sqlbuilder.query.Select;
+import org.citydb.sqlbuilder.schema.Table;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -50,26 +35,25 @@ public class ImplicitGeometryExporter extends DatabaseExporter {
 
     public ImplicitGeometryExporter(ExportHelper helper) throws SQLException {
         super(helper);
-        blobExporter = new BlobExporter(Table.IMPLICIT_GEOMETRY, "id", "library_object", helper);
+        Table implicitGeometry = tableHelper.getTable(org.citydb.database.schema.Table.IMPLICIT_GEOMETRY);
+        blobExporter = new BlobExporter(implicitGeometry, "id", "library_object", helper);
         externalFileHelper = ExternalFileHelper.newInstance(helper)
                 .withRelativeOutputFolder(ExportConstants.LIBRARY_OBJECTS_DIR)
                 .withFileNamePrefix(ExportConstants.LIBRARY_OBJECTS_PREFIX)
                 .createUniqueFileNames(true);
-        stmt = helper.getConnection().prepareStatement(getBaseQuery() +
-                "where ig.id = ?");
+        stmt = helper.getConnection().prepareStatement(getQuery(implicitGeometry).toSql());
     }
 
-    private String getBaseQuery() {
-        return "select ig.id, ig.mime_type, ig.mime_type_codespace, ig.reference_to_library, " +
-                "ig.relative_geometry_id, gd.implicit_geometry, " +
-                "gd.geometry_properties, gd.feature_id as geometry_feature_id " +
-                "from " + tableHelper.getPrefixedTableName(Table.IMPLICIT_GEOMETRY) + " ig " +
-                "left join " + tableHelper.getPrefixedTableName(Table.GEOMETRY_DATA) + " gd on ig.relative_geometry_id = gd.id ";
-    }
-
-    private String getQuery(Set<Long> ids) {
-        return getBaseQuery() +
-                "where " + adapter.getSchemaAdapter().getInOperator("ig.id", ids);
+    private Select getQuery(Table implicitGeometry) {
+        Table geometryData = tableHelper.getTable(org.citydb.database.schema.Table.GEOMETRY_DATA);
+        return Select.newInstance()
+                .select(implicitGeometry.columns("id", "mime_type", "mime_type_codespace", "reference_to_library",
+                        "relative_geometry_id"))
+                .select(geometryData.columns("implicit_geometry", "geometry_properties", "feature_id"))
+                .from(implicitGeometry)
+                .leftJoin(geometryData).on(geometryData.column("id")
+                        .eq(implicitGeometry.column("relative_geometry_id")))
+                .where(operationHelper.inArray(implicitGeometry.column("id"), Placeholder.empty()));
     }
 
     public ImplicitGeometry doExport(long id) throws ExportException, SQLException {
@@ -77,7 +61,7 @@ public class ImplicitGeometryExporter extends DatabaseExporter {
                 .doExport(Collections.emptySet(), Collections.singleton(id))
                 .values();
 
-        stmt.setLong(1, id);
+        setLongArrayOrNull(1, List.of(id));
         try (ResultSet rs = stmt.executeQuery()) {
             return doExport(appearances, rs).get(id);
         }
@@ -85,8 +69,8 @@ public class ImplicitGeometryExporter extends DatabaseExporter {
 
     public Map<Long, ImplicitGeometry> doExport(Set<Long> ids, Collection<Appearance> appearances) throws ExportException, SQLException {
         if (!ids.isEmpty()) {
-            try (Statement stmt = helper.getConnection().createStatement();
-                 ResultSet rs = stmt.executeQuery(getQuery(ids))) {
+            setLongArrayOrNull(1, ids);
+            try (ResultSet rs = stmt.executeQuery()) {
                 return doExport(appearances, rs);
             }
         } else {

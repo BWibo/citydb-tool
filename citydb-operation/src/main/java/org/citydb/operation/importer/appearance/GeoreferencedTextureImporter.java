@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.operation.importer.appearance;
@@ -24,12 +8,12 @@ package org.citydb.operation.importer.appearance;
 import com.alibaba.fastjson2.JSONArray;
 import org.citydb.database.schema.Sequence;
 import org.citydb.model.appearance.GeoreferencedTexture;
-import org.citydb.model.geometry.Geometry;
+import org.citydb.model.geometry.Point;
+import org.citydb.model.util.matrix.Matrix;
 import org.citydb.operation.importer.ImportException;
 import org.citydb.operation.importer.ImportHelper;
 
 import java.sql.SQLException;
-import java.sql.Types;
 import java.util.Collections;
 
 public class GeoreferencedTextureImporter extends TextureImporter {
@@ -50,25 +34,18 @@ public class GeoreferencedTextureImporter extends TextureImporter {
     public long doImport(GeoreferencedTexture texture) throws ImportException, SQLException {
         long surfaceDataId = nextSequenceValue(Sequence.SURFACE_DATA);
 
-        String orientation = texture.getOrientation()
-                .map(JSONArray::copyOf)
-                .map(JSONArray::toString)
+        JSONArray orientation = texture.getOrientation()
+                .map(Matrix::toRowMajor)
+                .map(JSONArray::new)
                 .orElse(null);
-        if (orientation != null) {
-            stmt.setObject(11, orientation, Types.OTHER);
-        } else {
-            stmt.setNull(11, Types.OTHER);
-        }
+
+        setJsonOrNull(11, getJson(orientation));
 
         Object referencePoint = getGeometry(texture.getReferencePoint()
-                .map(Geometry::force2D)
+                .map(Point::force2D)
                 .orElse(null), false);
-        if (referencePoint != null) {
-            stmt.setObject(12, referencePoint, adapter.getGeometryAdapter().getGeometrySQLType());
-        } else {
-            stmt.setNull(12, adapter.getGeometryAdapter().getGeometrySQLType(),
-                    adapter.getGeometryAdapter().getGeometryTypeName());
-        }
+
+        setGeometryOrNull(12, referencePoint);
 
         return doImport(texture, surfaceDataId);
     }

@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.io.citygml.writer;
@@ -44,7 +28,7 @@ import org.xmlobjects.util.xml.SAXWriter;
 import org.xmlobjects.xml.Element;
 import org.xmlobjects.xml.Namespaces;
 
-import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerConfigurationException;
 import javax.xml.transform.sax.SAXResult;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -81,7 +65,7 @@ public class CityGMLChunkWriter {
     }
 
     CityGMLChunkWriter setPrefix(String prefix, String namespaceURI) {
-        writer.withPrefix(prefix,namespaceURI);
+        writer.withPrefix(prefix, namespaceURI);
         return this;
     }
 
@@ -216,9 +200,8 @@ public class CityGMLChunkWriter {
             writer.writeObject(feature, namespaces);
             writer.writeEndElement();
             writer.writeEndDocument();
-            resetTransformer();
             return buffer;
-        } catch (XMLWriteException | ObjectSerializeException | TransformerException e) {
+        } catch (XMLWriteException | ObjectSerializeException e) {
             throw new WriteException("Caused by:", e);
         }
     }
@@ -234,8 +217,7 @@ public class CityGMLChunkWriter {
             writer.writeStartDocument();
             writer.writeObject(getCityModel(), namespaces);
             writer.writeEndDocument();
-            resetTransformer();
-        } catch (XMLWriteException | ObjectSerializeException | TransformerException e) {
+        } catch (XMLWriteException | ObjectSerializeException e) {
             throw new WriteException("Caused by:", e);
         } finally {
             state = State.DOCUMENT_STARTED;
@@ -258,19 +240,18 @@ public class CityGMLChunkWriter {
         }
     }
 
-    private XMLWriter getWriter(ContentHandler handler) {
+    private XMLWriter getWriter(ContentHandler handler) throws WriteException {
         if (transformer == null)
             return factory.createWriter(handler);
         else {
-            XMLWriter writer = factory.createWriter(transformer.getRootHandler());
-            transformer.setResult(new SAXResult(handler));
-            return writer;
-        }
-    }
-
-    private void resetTransformer() throws TransformerException {
-        if (transformer != null) {
-            transformer.reset();
+            try {
+                TransformerPipeline transformer = new TransformerPipeline(this.transformer);
+                XMLWriter writer = factory.createWriter(transformer.getRootHandler());
+                transformer.setResult(new SAXResult(handler));
+                return writer;
+            } catch (TransformerConfigurationException e) {
+                throw new WriteException("Failed to build XSL transformation pipeline.", e);
+            }
         }
     }
 

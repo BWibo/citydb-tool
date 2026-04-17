@@ -1,63 +1,58 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.database.schema;
 
 import com.alibaba.fastjson2.JSONObject;
+import org.citydb.core.version.Version;
+import org.citydb.database.adapter.DatabaseAdapter;
 import org.citydb.model.common.Name;
+import org.citydb.model.common.Namespaces;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
-public class Property {
+public class Property implements ValueObject, Typeable, Joinable {
     private final Name name;
-    private final Table table;
+    private final String description;
     private final Integer parentIndex;
-    private final String typeIdentifier;
     private final Value value;
+    private final String typeIdentifier;
+    private final String targetIdentifier;
+    private final RelationType relationType;
     private final JoinTable joinTable;
     private DataType type;
+    private FeatureType targetFeature;
+    private GeometryType targetGeometry;
     private Map<Name, Property> properties;
     private Join join;
 
-    Property(Name name, Table table, Integer parentIndex, String typeIdentifier, Value value, Join join,
-             JoinTable joinTable) {
+    private Property(Name name, String description, Integer parentIndex, Value value, String typeIdentifier,
+                     String targetIdentifier, RelationType relationType, Join join, JoinTable joinTable) {
         this.name = name;
-        this.table = table;
+        this.description = description;
         this.parentIndex = parentIndex;
-        this.typeIdentifier = typeIdentifier;
         this.value = value;
+        this.typeIdentifier = typeIdentifier;
+        this.targetIdentifier = targetIdentifier;
+        this.relationType = relationType;
         this.join = join;
         this.joinTable = joinTable;
     }
 
-    static Property of(JSONObject object) throws SchemaException {
+    static Property of(JSONObject object, DatabaseAdapter adapter) throws SchemaException {
         String propertyName = object.getString("name");
+        String description = object.getString("description");
         String namespace = object.getString("namespace");
-        String tableName = object.getString("table");
         Integer parentIndex = object.getInteger("parent");
         JSONObject valueObject = object.getJSONObject("value");
         String typeIdentifier = object.getString("type");
+        String targetIdentifier = object.getString("target");
+        String relationTypeName = object.getString("relationType");
         JSONObject joinObject = object.getJSONObject("join");
         JSONObject joinTableObject = object.getJSONObject("joinTable");
 
@@ -65,50 +60,75 @@ public class Property {
             throw new SchemaException("No name defined for the property.");
         } else if (namespace == null) {
             throw new SchemaException("No namespace defined for the property.");
-        } else if (tableName != null && joinObject == null && joinTableObject == null) {
-            throw new SchemaException("No join or join table defined for the property table " + tableName + ".");
         } else if (valueObject != null && typeIdentifier != null) {
             throw new SchemaException("A property must not define both a value and a type.");
         } else if (joinObject != null && joinTableObject != null) {
             throw new SchemaException("A property must not define both a join and a join table.");
         }
 
-        Table table = Table.of(tableName);
-        if (tableName != null && table == null) {
-            throw new SchemaException("The property table " + tableName + " is not supported.");
+        if (typeIdentifier != null && targetIdentifier == null) {
+            switch (typeIdentifier) {
+                case "core:FeatureProperty" ->
+                        throw new SchemaException("A feature property must define a target feature.");
+                case "core:GeometryProperty" ->
+                        throw new SchemaException("A geometry property must define a target geometry.");
+                case "core:AddressProperty" -> targetIdentifier = "core:Address";
+                case "core:AppearanceProperty" -> targetIdentifier = "app:Appearance";
+                case "core:ImplicitGeometryProperty" -> targetIdentifier = "core:ImplicitGeometry";
+            }
         }
 
-        return new Property(Name.of(propertyName, namespace), table, parentIndex, typeIdentifier,
+        RelationType relationType = "core:FeatureProperty".equals(typeIdentifier) ?
+                getRelationType(propertyName, namespace, relationTypeName, adapter) :
+                null;
+
+        return new Property(Name.of(propertyName, namespace), description, parentIndex,
                 valueObject != null ? Value.of(valueObject) : null,
+                typeIdentifier, targetIdentifier, relationType,
                 joinObject != null ? Join.of(joinObject) : null,
                 joinTableObject != null ? JoinTable.of(joinTableObject) : null);
     }
 
+    @Override
     public Name getName() {
         return name;
     }
 
-    public Optional<Table> getTable() {
-        return Optional.ofNullable(table);
+    public Optional<String> getDescription() {
+        return Optional.ofNullable(description);
     }
 
     Integer getParentIndex() {
         return parentIndex;
     }
 
+    @Override
     public Optional<Value> getValue() {
         return Optional.ofNullable(value);
     }
 
+    @Override
     public Optional<DataType> getType() {
         return Optional.ofNullable(type);
+    }
+
+    public Optional<FeatureType> getTargetFeature() {
+        return Optional.ofNullable(targetFeature);
+    }
+
+    public Optional<GeometryType> getTargetGeometry() {
+        return Optional.ofNullable(targetGeometry);
+    }
+
+    public Optional<RelationType> getRelationType() {
+        return Optional.ofNullable(relationType);
     }
 
     public Map<Name, Property> getProperties() {
         return properties != null ? properties : Collections.emptyMap();
     }
 
-    void addProperty(Property property) {
+    private void addProperty(Property property) {
         if (properties == null) {
             properties = new LinkedHashMap<>();
         }
@@ -116,6 +136,7 @@ public class Property {
         properties.put(property.name, property);
     }
 
+    @Override
     public Optional<Join> getJoin() {
         return Optional.ofNullable(join);
     }
@@ -125,8 +146,47 @@ public class Property {
         return this;
     }
 
+    @Override
     public Optional<JoinTable> getJoinTable() {
         return Optional.ofNullable(joinTable);
+    }
+
+    private static RelationType getRelationType(String name, String namespace, String relationTypeName, DatabaseAdapter adapter) throws SchemaException {
+        if (adapter.getDatabaseMetadata().getVersion().compareTo(Version.of(5, 1, 0)) < 0
+                && relationTypeName == null
+                && Namespaces.isCityDBNamespace(namespace)) {
+            return switch (namespace) {
+                case Namespaces.CORE -> switch (name) {
+                    case "generalizesTo", "relatedTo" -> RelationType.RELATES;
+                    default -> RelationType.CONTAINS;
+                };
+                case Namespaces.DYNAMIZER -> name.equals("sensorLocation") ?
+                        RelationType.RELATES :
+                        RelationType.CONTAINS;
+                case Namespaces.TRANSPORTATION -> switch (name) {
+                    case "predecessor", "successor" -> RelationType.RELATES;
+                    default -> RelationType.CONTAINS;
+                };
+                case Namespaces.CITY_OBJECT_GROUP -> switch (name) {
+                    case "parent", "groupMember" -> RelationType.RELATES;
+                    default -> RelationType.CONTAINS;
+                };
+                case Namespaces.VERSIONING -> switch (name) {
+                    case "versionMember", "oldFeature", "newFeature" -> RelationType.RELATES;
+                    default -> RelationType.CONTAINS;
+                };
+                default -> RelationType.CONTAINS;
+            };
+        } else {
+            RelationType relationType = RelationType.of(relationTypeName);
+            if (relationTypeName == null) {
+                throw new SchemaException("A feature property must define a relation type.");
+            } else if (relationType == null) {
+                throw new SchemaException("The relation type " + relationTypeName + " is unsupported.");
+            }
+
+            return relationType;
+        }
     }
 
     void postprocess(Map<Name, Property> properties, SchemaMapping schemaMapping) throws SchemaException {
@@ -148,5 +208,29 @@ public class Property {
                 throw new SchemaException("The property references an undefined type " + typeIdentifier + ".");
             }
         }
+
+        if (targetIdentifier != null) {
+            FeatureType candidate = schemaMapping.getFeatureTypeByIdentifier(targetIdentifier);
+            if (candidate != FeatureType.UNDEFINED) {
+                targetFeature = candidate;
+            } else {
+                targetGeometry = GeometryType.of(targetIdentifier);
+            }
+
+            if (targetFeature == null && targetGeometry == null) {
+                throw new SchemaException("The property references an undefined target " + targetIdentifier + ".");
+            }
+        }
+
+        if (join != null) {
+            join.postprocess(this, schemaMapping);
+        } else if (joinTable != null) {
+            joinTable.postprocess(this, schemaMapping);
+        }
+    }
+
+    @Override
+    public String toString() {
+        return name.toString();
     }
 }

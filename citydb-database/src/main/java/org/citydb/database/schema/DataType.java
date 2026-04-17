@@ -1,67 +1,36 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.database.schema;
 
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import org.citydb.database.adapter.DatabaseAdapter;
 import org.citydb.model.common.Name;
 import org.citydb.model.common.Namespaces;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
-public class DataType {
+public class DataType extends Type<DataType> implements ValueObject {
     public static final DataType UNDEFINED = new DataType(1, "core:Undefined", Name.of("Undefined", Namespaces.CORE),
-            Table.PROPERTY, null, null, null, null, null);
+            Table.PROPERTY, null, false, null, null, null, null, null);
 
-    private final int id;
-    private final String identifier;
-    private final Name name;
-    private final Table table;
-    private final Integer superTypeId;
-    private final Map<Name, Property> properties;
     private final Value value;
-    private final Join join;
-    private final JoinTable joinTable;
-    private DataType superType;
 
-    DataType(int id, String identifier, Name name, Table table, Integer superTypeId, Map<Name, Property> properties,
-             Value value, Join join, JoinTable joinTable) {
-        this.id = id;
-        this.identifier = identifier;
-        this.name = name;
-        this.table = table;
-        this.superTypeId = superTypeId;
-        this.properties = properties;
+    private DataType(int id, String identifier, Name name, Table table, String description, boolean isAbstract,
+                     Integer superTypeId, Map<Name, Property> properties, Value value, Join join, JoinTable joinTable) {
+        super(id, identifier, name, table, description, isAbstract, superTypeId, properties, join, joinTable);
         this.value = value;
-        this.join = join;
-        this.joinTable = joinTable;
     }
 
-    static DataType of(int id, Name name, Integer superTypeId, JSONObject object) throws SchemaException {
+    static DataType of(int id, Name name, boolean isAbstract, Integer superTypeId, JSONObject object,
+                       DatabaseAdapter adapter) throws SchemaException {
         String identifier = object.getString("identifier");
         String tableName = object.getString("table");
+        String description = object.getString("description");
         JSONArray propertiesArray = object.getJSONArray("properties");
         JSONObject valueObject = object.getJSONObject("value");
         JSONObject joinObject = object.getJSONObject("join");
@@ -81,22 +50,8 @@ public class DataType {
         }
 
         try {
-            Map<Name, Property> properties = null;
-            if (propertiesArray != null && !propertiesArray.isEmpty()) {
-                properties = new LinkedHashMap<>();
-                for (Object item : propertiesArray) {
-                    if (item instanceof JSONObject propertyObject) {
-                        Property property = Property.of(propertyObject);
-                        properties.put(property.getName(), property);
-                    }
-                }
-
-                if (properties.size() != propertiesArray.size()) {
-                    throw new SchemaException("The properties array contains invalid properties.");
-                }
-            }
-
-            return new DataType(id, identifier, name, table, superTypeId, properties,
+            return new DataType(id, identifier, name, table, description, isAbstract, superTypeId,
+                    propertiesArray != null ? Type.buildProperties(propertiesArray, adapter) : null,
                     valueObject != null ? Value.of(valueObject) : null,
                     joinObject != null ? Join.of(joinObject) : null,
                     joinTableObject != null ? JoinTable.of(joinTableObject) : null);
@@ -105,43 +60,15 @@ public class DataType {
         }
     }
 
-    public int getId() {
-        return id;
-    }
-
-    String getIdentifier() {
-        return identifier;
-    }
-
-    public Name getName() {
-        return name;
-    }
-
-    public Table getTable() {
-        return table;
-    }
-
-    public Optional<DataType> getSuperType() {
-        return Optional.ofNullable(superType);
-    }
-
+    @Override
     public Optional<Value> getValue() {
         return Optional.ofNullable(value);
     }
 
-    public Map<Name, Property> getProperties() {
-        return properties != null ? properties : Collections.emptyMap();
-    }
-
-    public Optional<Join> getJoin() {
-        return Optional.ofNullable(join);
-    }
-
-    public Optional<JoinTable> getJoinTable() {
-        return Optional.ofNullable(joinTable);
-    }
-
+    @Override
     void postprocess(SchemaMapping schemaMapping) throws SchemaException {
+        super.postprocess(schemaMapping);
+
         if (superTypeId != null) {
             superType = schemaMapping.getDataType(superTypeId);
             if (superType == DataType.UNDEFINED) {
@@ -165,5 +92,10 @@ public class DataType {
         } catch (SchemaException e) {
             throw new SchemaException("Failed to build data type (ID " + id + ").", e);
         }
+    }
+
+    @Override
+    DataType self() {
+        return this;
     }
 }

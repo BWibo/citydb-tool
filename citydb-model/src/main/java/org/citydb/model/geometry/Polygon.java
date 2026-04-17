@@ -1,22 +1,6 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.model.geometry;
@@ -41,6 +25,13 @@ public class Polygon extends Surface<Polygon> {
         this.reversed = reversed;
     }
 
+    private Polygon(LinearRing exteriorRing, LinearRing[] interiorRings, boolean reversed) {
+        Objects.requireNonNull(exteriorRing, "The exterior ring must not be null.");
+        this.exteriorRing = asChild(exteriorRing);
+        this.interiorRings = interiorRings != null ? asChild(Arrays.asList(interiorRings)) : null;
+        this.reversed = reversed;
+    }
+
     public static Polygon of(LinearRing exteriorRing, List<LinearRing> interiorRings, boolean reversed) {
         return new Polygon(exteriorRing, interiorRings, reversed);
     }
@@ -50,37 +41,23 @@ public class Polygon extends Surface<Polygon> {
     }
 
     public static Polygon of(LinearRing exteriorRing, LinearRing[] interiorRings, boolean reversed) {
-        return new Polygon(exteriorRing, interiorRings != null ? Arrays.asList(interiorRings) : null, reversed);
+        return new Polygon(exteriorRing, interiorRings, reversed);
     }
 
     public static Polygon of(LinearRing exteriorRing, LinearRing[] interiorRings) {
-        return new Polygon(exteriorRing, interiorRings != null ? Arrays.asList(interiorRings) : null, false);
+        return new Polygon(exteriorRing, interiorRings, false);
     }
 
     public static Polygon of(LinearRing exteriorRing, boolean reversed) {
-        return new Polygon(exteriorRing, null, reversed);
+        return new Polygon(exteriorRing, (List<LinearRing>) null, reversed);
     }
 
     public static Polygon of(LinearRing exteriorRing) {
-        return new Polygon(exteriorRing, null, false);
-    }
-
-    public static Polygon of(Envelope envelope) {
-        Objects.requireNonNull(envelope, "The envelope must not be null.");
-        Coordinate lowerLeft = envelope.getLowerCorner();
-        Coordinate upperRight = envelope.getUpperCorner();
-        Coordinate lowerRight = Coordinate.of(upperRight.getX(), lowerLeft.getY());
-        Coordinate upperLeft = Coordinate.of(lowerLeft.getX(), upperRight.getY());
-        if (envelope.getDimension() == 3) {
-            lowerRight.setZ(lowerLeft.getZ());
-            upperLeft.setZ(upperRight.getZ());
-        }
-
-        return Polygon.of(LinearRing.of(Arrays.asList(lowerLeft, lowerRight, upperRight, upperLeft, lowerLeft)));
+        return new Polygon(exteriorRing, (List<LinearRing>) null, false);
     }
 
     public static Polygon empty() {
-        return new Polygon(LinearRing.empty(), null, false);
+        return new Polygon(LinearRing.empty(), (List<LinearRing>) null, false);
     }
 
     public LinearRing getExteriorRing() {
@@ -133,6 +110,17 @@ public class Polygon extends Surface<Polygon> {
         }
 
         return this;
+    }
+
+    @Override
+    public Polygon copy() {
+        return new Polygon(exteriorRing.copy(),
+                interiorRings != null ? interiorRings.stream()
+                        .map(LinearRing::copy)
+                        .toArray(LinearRing[]::new) :
+                        null,
+                reversed)
+                .copyPropertiesFrom(this);
     }
 
     @Override

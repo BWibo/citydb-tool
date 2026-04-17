@@ -1,35 +1,21 @@
 /*
- * citydb-tool - Command-line tool for the 3D City Database
- * https://www.3dcitydb.org/
- *
- * Copyright 2022-2024
- * virtualcitysystems GmbH, Germany
- * https://vc.systems/
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright virtualcitysystems GmbH <https://vc.systems>
  */
 
 package org.citydb.model.property;
 
+import org.citydb.model.common.Child;
 import org.citydb.model.common.InlineProperty;
 import org.citydb.model.common.Name;
+import org.citydb.model.feature.Feature;
 import org.citydb.model.geometry.Geometry;
 
 import java.util.Objects;
 import java.util.Optional;
 
 public class GeometryProperty extends Property<GeometryProperty> implements InlineProperty<Geometry<?>> {
-    private final Geometry<?> geometry;
+    private Geometry<?> geometry;
     private String lod;
 
     private GeometryProperty(Name name, Geometry<?> geometry) {
@@ -47,6 +33,15 @@ public class GeometryProperty extends Property<GeometryProperty> implements Inli
         return geometry;
     }
 
+    @Override
+    public GeometryProperty setObject(Geometry<?> geometry) {
+        if (geometry != null) {
+            this.geometry = asChild(geometry);
+        }
+
+        return this;
+    }
+
     public Optional<String> getLod() {
         return Optional.ofNullable(lod);
     }
@@ -59,6 +54,18 @@ public class GeometryProperty extends Property<GeometryProperty> implements Inli
     public GeometryProperty setLod(int lod) {
         this.lod = String.valueOf(lod);
         return this;
+    }
+
+    @Override
+    public boolean removeFromParent() {
+        Child parent = getParent().orElse(null);
+        if (parent instanceof Feature feature) {
+            return feature.getGeometries().remove(this);
+        } else if (parent instanceof Attribute attribute) {
+            return attribute.getProperties().remove(this);
+        } else {
+            return false;
+        }
     }
 
     @Override

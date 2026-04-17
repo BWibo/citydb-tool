@@ -13,3 +13,6 @@ bin/
 *.iml
 *.iws
 out/
+
+# Claude Code
+.claude/
